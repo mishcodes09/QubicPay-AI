@@ -6,11 +6,15 @@ const cors = require('cors');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 
-// Import services
-const { connectDB, PaymentSchedulerService, ScheduledPayment } = require('./services/paymentScheduler');
-const { executePlan } = require('./orchestrator');
-const { logDecisionOnChain, getContractInfo, getDecisionFromChain, updateDecisionStatus } = require('./decisionLogger');
-const { parseInstructionWithScheduling, formatDateForDisplay } = require('./enhancedParser');
+// ==================== QUBIC IMPORTS (UPDATED) ====================
+const { getQubicPaymentService } = require('./services/qubicPayments');
+const { getRemittanceService } = require('./services/remittanceService');
+const { getCrossBorderService } = require('./services/crossBorderService');
+const { getExchangeRateService } = require('./services/exchangeRateService');
+const { getFirebaseScheduler } = require('./services/firebaseScheduler');
+const { getSecurityMonitor } = require('./services/securityMonitor');
+const { parseInstructionWithScheduling, formatDateForDisplay } = require('./services/enhancedParser');
+const { getWalletService } = require('./walletService');
 
 const app = express();
 
@@ -21,29 +25,146 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Connect to MongoDB
-connectDB().then(() => {
-  console.log('✅ Database ready');
-}).catch(err => {
-  console.error('❌ Database connection failed:', err);
-});
+// ==================== INITIALIZE SERVICES ====================
 
-// Initialize Payment Scheduler Service
-const paymentScheduler = new PaymentSchedulerService();
+const paymentScheduler = getFirebaseScheduler();
+const securityMonitor = getSecurityMonitor();
+const walletService = getWalletService();
+const qubicPayments = getQubicPaymentService();
 
-// Mock user data
-const mockUser = {
-  id: 'demo-user',
-  wallet: {
-    address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
-    balance: 1000,
-    circleWalletId: 'wallet_demo_123'
-  },
-  agent: {
-    personality: 'balanced',
-    dailyLimit: 500
+let remittanceService = null;
+let crossBorderService = null;
+let exchangeRateService = null;
+
+// YOUR WALLET ADDRESS
+const USER_WALLET_ADDRESS = process.env.USER_WALLET_ADDRESS;
+const QUBIC_USDC_CONTRACT = process.env.QUBIC_USDC_ADDRESS;
+
+// Cache wallet data
+let cachedWalletData = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 30000; // 30 seconds
+let fetchInProgress = false;
+
+// ==================== WALLET DATA HELPERS ====================
+
+async function getFreshWalletData(forceRefresh = false) {
+  const now = Date.now();
+  
+  while (fetchInProgress) {
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
-};
+  
+  if (!forceRefresh && cachedWalletData && (now - lastFetchTime) < CACHE_DURATION) {
+    return cachedWalletData;
+  }
+  
+  fetchInProgress = true;
+  
+  try {
+    console.log('[WALLET] Fetching fresh wallet data from Qubic blockchain...');
+    
+    const walletInfo = await walletService.getWalletInfo(
+      USER_WALLET_ADDRESS,
+      QUBIC_USDC_CONTRACT
+    );
+    
+    cachedWalletData = {
+      id: 'demo-user',
+      wallet: {
+        address: USER_WALLET_ADDRESS,
+        balance: walletInfo.balances.usdc || 0,
+        qubicBalance: walletInfo.balances.qubic || 0,
+        transactionCount: walletInfo.transactionCount,
+        walletId: 'qubic_wallet_' + USER_WALLET_ADDRESS.slice(2, 10)
+      },
+      agent: {
+        personality: 'balanced',
+        dailyLimit: 500
+      },
+      network: walletInfo.network,
+      blockchain: 'qubic',
+      lastUpdated: walletInfo.lastUpdated
+    };
+    
+    lastFetchTime = now;
+    
+    console.log('[WALLET] ✅ Wallet data updated:', {
+      address: USER_WALLET_ADDRESS.slice(0, 10) + '...',
+      usdcBalance: cachedWalletData.wallet.balance,
+      qubicBalance: cachedWalletData.wallet.qubicBalance,
+      txCount: cachedWalletData.wallet.transactionCount
+    });
+    
+    return cachedWalletData;
+  } catch (error) {
+    console.error('[WALLET] ❌ Error fetching wallet data:', error.message);
+    
+    if (cachedWalletData) {
+      console.log('[WALLET] Using cached data as fallback');
+      return cachedWalletData;
+    }
+    
+    return {
+      id: 'demo-user',
+      wallet: {
+        address: USER_WALLET_ADDRESS,
+        balance: 0,
+        qubicBalance: 0,
+        transactionCount: 0,
+        walletId: 'qubic_wallet_error'
+      },
+      agent: {
+        personality: 'balanced',
+        dailyLimit: 500
+      },
+      blockchain: 'qubic',
+      error: 'Failed to fetch wallet data'
+    };
+  } finally {
+    fetchInProgress = false;
+  }
+}
+
+let mockUser = null;
+
+// ==================== STARTUP INITIALIZATION ====================
+
+(async () => {
+  try {
+    console.log('[STARTUP] Initializing QubicPay AI services...');
+    
+    // Initialize Firebase
+    console.log('[FIREBASE] Initializing Firebase services...');
+    await paymentScheduler.initialize();
+    
+    // Initialize Security Monitor
+    console.log('[SECURITY] Initializing security monitor...');
+    await securityMonitor.initialize();
+    console.log('[SECURITY] ✅ Security Monitor ready');
+    
+    // Initialize Qubic Payments
+    console.log('[QUBIC] Initializing Qubic blockchain integration...');
+    await qubicPayments.initialize();
+    console.log('[QUBIC] ✅ Qubic Payment Service ready');
+    
+    // Initialize Cross-Border Services
+    console.log('[REMITTANCE] Initializing cross-border services...');
+    exchangeRateService = getExchangeRateService();
+    crossBorderService = getCrossBorderService(paymentScheduler);
+    remittanceService = getRemittanceService();
+    await remittanceService.initialize(paymentScheduler);
+    console.log('[REMITTANCE] ✅ Cross-border services ready');
+    console.log('[REMITTANCE] 🌍 6 countries supported (KE, NG, ZA, GH, UG, RW)');
+    
+    // Fetch wallet data
+    mockUser = await getFreshWalletData();
+    console.log('[WALLET] 🎯 Qubic wallet integrated successfully!');
+    console.log('[STARTUP] ✅ All services initialized!');
+  } catch (error) {
+    console.error('[STARTUP] Failed to initialize:', error);
+  }
+})();
 
 // In-memory instruction store
 const STORE = {
@@ -51,115 +172,252 @@ const STORE = {
   transactions: {}
 };
 
-// ==================== ROUTES ====================
+// ==================== CORE ROUTES ====================
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
-    status: 'ok', 
-    mongodb: require('mongoose').connection.readyState === 1 ? 'connected' : 'disconnected',
-    cloudflare: process.env.CLOUDFLARE_WORKER_URL ? 'configured' : 'not configured',
-    blockchain: process.env.DECISION_CONTRACT_ADDRESS ? 'configured' : 'not configured',
+    status: 'ok',
+    blockchain: 'qubic',
+    firebase: paymentScheduler.initialized ? 'connected' : 'disconnected',
+    qubicPayments: qubicPayments.initialized ? 'ready' : 'initializing',
+    wallet: cachedWalletData ? 'connected' : 'initializing',
+    security: securityMonitor.initialized ? 'ready' : 'initializing',
     timestamp: new Date().toISOString() 
   });
 });
 
-// Get user profile
-app.get('/api/me', (req, res) => {
-  res.json(mockUser);
-});
-
-// ==================== BLOCKCHAIN ROUTES ====================
-
-// Get blockchain stats
-app.get('/api/blockchain/stats', async (req, res) => {
+// Get user profile with wallet data
+app.get('/api/me', async (req, res) => {
   try {
-    const stats = await getContractInfo();
-    res.json(stats);
+    const forceRefresh = req.query.refresh === 'true';
+    const walletData = await getFreshWalletData(forceRefresh);
+    res.json(walletData);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('[API] /me error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch wallet data',
+      message: error.message 
+    });
   }
 });
 
-// Get specific decision from blockchain
-app.get('/api/blockchain/decision/:decisionId', async (req, res) => {
+// ==================== QUBIC PAYMENT ROUTES ====================
+
+// One-step payment (create + execute via Qubic)
+app.post('/api/qubic/payment/send', async (req, res) => {
   try {
-    const decision = await getDecisionFromChain(req.params.decisionId);
+    const { to, amount, currency, description } = req.body;
+    const userId = req.headers['x-user-id'] || 'demo-user';
     
-    if (!decision) {
-      return res.status(404).json({ error: 'Decision not found on blockchain' });
+    if (!to || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: to, amount'
+      });
     }
     
-    res.json(decision);
+    console.log(`[QUBIC API] Payment: ${amount} ${currency || 'USDC'} to ${to}`);
+    
+    // Check balance
+    const user = await getFreshWalletData(true);
+    if (amount > user.wallet.balance) {
+      return res.status(400).json({
+        success: false,
+        error: `Insufficient balance: ${user.wallet.balance} USDC`
+      });
+    }
+    
+    // Execute via Qubic
+    const result = await qubicPayments.instantTransfer({
+      recipient: to,
+      amount: parseFloat(amount),
+      decisionId: `direct_${Date.now()}`
+    });
+    
+    if (result.success) {
+      // Log to Firebase
+      try {
+        await paymentScheduler.logPaymentHistory(userId, {
+          paymentId: `qubic_${Date.now()}`,
+          type: 'direct',
+          payee: to,
+          amount: parseFloat(amount),
+          currency: currency || 'USDC',
+          status: 'completed',
+          txHash: result.txHash,
+          explorerUrl: result.explorerUrl,
+          blockchain: 'qubic'
+        });
+        console.log('[QUBIC API] ✅ Payment logged to Firebase');
+      } catch (error) {
+        console.warn('[QUBIC API] History logging failed:', error.message);
+      }
+      
+      res.json({
+        success: true,
+        payment: result,
+        txHash: result.txHash,
+        explorerUrl: result.explorerUrl,
+        blockchain: 'qubic',
+        message: `Successfully sent ${amount} ${currency || 'USDC'} to ${to}`
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        payment: result
+      });
+    }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('[API] Qubic payment error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
-// ==================== CLOUDFLARE AI CHAT ====================
+// ==================== REMITTANCE ROUTES ====================
 
-// AI Chat endpoint with Cloudflare Workers AI
+// Send international remittance
+app.post('/api/remittance/send', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 'demo-user';
+    const { recipientId, amount, description } = req.body;
+    
+    if (!recipientId || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: recipientId, amount'
+      });
+    }
+    
+    console.log(`[REMITTANCE API] Send: ${amount} USDC to recipient ${recipientId}`);
+    
+    const result = await remittanceService.sendRemittance(userId, {
+      recipientId,
+      amount: parseFloat(amount),
+      description: description || `Remittance to ${recipientId}`
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('[API] Remittance error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Preview remittance
+app.post('/api/remittance/preview', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 'demo-user';
+    const { recipientId, amount } = req.body;
+    
+    const preview = await remittanceService.previewRemittance(userId, recipientId, amount);
+    res.json(preview);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get remittance history
+app.get('/api/remittance/history', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 'demo-user';
+    const history = await remittanceService.getHistory(userId);
+    res.json({ success: true, history });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== RECIPIENT MANAGEMENT ====================
+
+// Add recipient
+app.post('/api/recipients/add', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 'demo-user';
+    const recipient = await crossBorderService.addRecipient(userId, req.body);
+    res.json({ success: true, recipient });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get recipients
+app.get('/api/recipients', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 'demo-user';
+    const recipients = await crossBorderService.getRecipients(userId, req.query);
+    res.json({ success: true, recipients });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== CHAT WITH AI MEMORY ====================
+
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages } = req.body;
     const userId = req.headers['x-user-id'] || 'demo-user';
     
-    console.log(`[CHAT] User: ${userId}, Messages: ${messages?.length || 0}`);
+    console.log(`[CHAT] User: ${userId}, Building context...`);
     
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Messages array is required' });
-    }
-    
-    // Get user context
-    const user = mockUser;
+    const user = await getFreshWalletData(true);
     const wallet = user.wallet;
     const agent = user.agent;
     
-    // Add ArcBot system context
+    const memory = await buildAIMemoryContext(userId);
+    
     const systemMessage = {
       role: "system",
-      content: `You are ArcBot, an AI assistant for cryptocurrency wallet management powered by Cloudflare Workers AI.
+      content: `You are QubicPay AI, an AI assistant for cross-border cryptocurrency payments on Qubic blockchain.
 
-**User Context:**
-- Wallet Balance: ${wallet.balance} USDC
-- Wallet Address: ${wallet.address}
-- Daily Limit: ${agent.dailyLimit} USDC
-- Personality: ${agent.personality}
+**CURRENT USER DATA:**
+- Balance: ${wallet.balance} USDC
+- Wallet: ${wallet.address}
+- Blockchain: Qubic
+- Today's Date: ${new Date().toISOString().split('T')[0]}
 
-**You can help users with:**
-- Checking wallet balance and transactions
-- Scheduling payments and recurring transfers
-- Sending money to contacts
-- Saving for goals
-- Viewing transaction history
-- Answering questions about crypto and payments
+**PAYMENT REQUEST FORMAT:**
+PAYMENT_REQUEST: {"recipient": "0xADDRESS", "amount": 10.50, "currency": "USDC", "description": "Payment description"}
 
-**Available Commands:**
-- "What's my balance?" - Check wallet balance
-- "Schedule a payment" - Set up future payments
-- "Send [amount] to [person]" - Transfer funds
-- "Show my scheduled payments" - View upcoming payments
-- "Transaction history" - View past transactions
+**REMITTANCE REQUEST FORMAT:**
+REMITTANCE_REQUEST: {"recipientId": "new", "recipientName": "John Doe", "country": "Kenya", "countryCode": "KE", "walletAddress": "0x1234...", "phoneNumber": "+254712345678", "amount": 50, "currency": "USDC"}
 
-Be helpful, concise, and security-conscious. When users want to perform financial actions, guide them with clear instructions.`
+**SUPPORTED COUNTRIES & EXCHANGE RATES:**
+1. 🇰🇪 Kenya (KES) - Rate: 1 USDC = 129 KES - M-Pesa (5-15 min)
+2. 🇳🇬 Nigeria (NGN) - Rate: 1 USDC = 775 NGN - Bank Transfer (1-2 hours)
+3. 🇿🇦 South Africa (ZAR) - Rate: 1 USDC = 18.5 ZAR - Bank Transfer (1-2 hours)
+4. 🇬🇭 Ghana (GHS) - Rate: 1 USDC = 12 GHS - Mobile Money (5-15 min)
+5. 🇺🇬 Uganda (UGX) - Rate: 1 USDC = 3,750 UGX - Mobile Money (5-15 min)
+6. 🇷🇼 Rwanda (RWF) - Rate: 1 USDC = 1,100 RWF - Mobile Money (5-15 min)
+
+**PAYMENT MEMORY:**
+${memory.paymentMemory}
+
+**STATISTICS:**
+${memory.statistics}
+
+**BLOCKCHAIN:**
+All transactions are logged on Qubic blockchain with full transparency and auditability.
+
+Be helpful, security-conscious, and guide users through cross-border payments.`
     };
     
-    // Prepare messages for Cloudflare
     const chatMessages = [systemMessage, ...messages];
     
-    // Check if Cloudflare Worker is configured
     const cloudflareWorkerUrl = process.env.CLOUDFLARE_WORKER_URL;
     
     if (!cloudflareWorkerUrl) {
-      return res.status(500).json({ 
-        error: 'Cloudflare Worker not configured',
-        message: 'Please set CLOUDFLARE_WORKER_URL in your .env file'
-      });
+      return res.status(500).json({ error: 'Cloudflare Worker not configured' });
     }
     
-    console.log(`[CHAT] Forwarding to Cloudflare Worker: ${cloudflareWorkerUrl}`);
-    
-    // Forward to Cloudflare Worker and stream response
     const response = await axios.post(
       `${cloudflareWorkerUrl}/api/chat`,
       { messages: chatMessages },
@@ -173,414 +431,89 @@ Be helpful, concise, and security-conscious. When users want to perform financia
       }
     );
     
-    // Set headers for streaming
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
     
-    // Pipe the stream from Cloudflare to client
     response.data.pipe(res);
-    
-    // Handle stream errors
-    response.data.on('error', (error) => {
-      console.error('[CHAT] Stream error:', error.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Stream error' });
-      }
-    });
     
   } catch (error) {
     console.error('[CHAT] Error:', error.message);
-    
-    if (error.code === 'ECONNREFUSED') {
-      return res.status(503).json({ 
-        error: 'Cannot connect to Cloudflare Worker',
-        message: 'Make sure your Worker is deployed and CLOUDFLARE_WORKER_URL is correct'
-      });
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
     }
-    
-    res.status(500).json({ error: error.message });
   }
 });
 
-// Chat with command detection (smart routing)
-app.post('/api/chat/smart', async (req, res) => {
+// ==================== AI MEMORY BUILDER ====================
+
+async function buildAIMemoryContext(userId) {
+  const context = {
+    paymentMemory: '',
+    conversationMemory: '',
+    statistics: ''
+  };
+  
   try {
-    const { message } = req.body;
+    const history = await paymentScheduler.getPaymentHistory(userId, 100);
+    
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    const recentPayments = history.filter(p => {
+      const paymentDate = p.timestamp?.toDate ? p.timestamp.toDate() : new Date(p.timestamp);
+      return paymentDate >= thirtyDaysAgo;
+    });
+    
+    if (recentPayments.length > 0) {
+      context.paymentMemory = recentPayments.map(p => {
+        const date = p.timestamp?.toDate ? p.timestamp.toDate() : new Date(p.timestamp);
+        const dateStr = date.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        
+        return `- ${dateStr}: Sent ${p.amount} ${p.currency} to ${p.payee}
+  Status: ${p.status}
+  Blockchain: Qubic
+  ${p.txHash ? `TX: ${p.txHash}` : ''}
+  ${p.explorerUrl ? `Explorer: ${p.explorerUrl}` : ''}`;
+      }).join('\n\n');
+    } else {
+      context.paymentMemory = '(No payment history in last 30 days)';
+    }
+    
+    const totalAmount = recentPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    
+    context.statistics = `
+Total Payments (30 days): ${recentPayments.length}
+Total Volume: ${totalAmount.toFixed(2)} USDC
+Blockchain: Qubic
+
+All transactions are verifiable on Qubic Explorer`;
+    
+  } catch (error) {
+    console.error('[MEMORY] Error building context:', error.message);
+    context.paymentMemory = '(Error loading payment history)';
+  }
+  
+  return context;
+}
+
+// ==================== SECURITY ROUTES ====================
+
+// Check transaction security
+app.post('/api/security/check', async (req, res) => {
+  try {
     const userId = req.headers['x-user-id'] || 'demo-user';
-    
-    console.log(`[CHAT/SMART] Processing: "${message}"`);
-    
-    // Detect financial commands
-    const messageL = message.toLowerCase();
-    
-    // Balance query
-    if (messageL.includes('balance') || messageL.includes('how much')) {
-      const wallet = mockUser.wallet;
-      return res.json({
-        type: 'balance',
-        message: `💰 **Your Wallet Balance**\n\nCurrent Balance: ${wallet.balance} USDC\nWallet Address: \`${wallet.address}\`\nDaily Limit: ${mockUser.agent.dailyLimit} USDC`
-      });
-    }
-    
-    // Blockchain stats query
-    if (messageL.includes('blockchain') || messageL.includes('on-chain')) {
-      const stats = await getContractInfo();
-      return res.json({
-        type: 'blockchain',
-        message: `🔗 **Blockchain Status**\n\n${stats.enabled ? `Agent: ${stats.agentAddress}\nDecisions: ${stats.agentDecisions}\nVolume: ${stats.totalVolume}\nExplorer: ${stats.explorerUrl}` : 'Blockchain not configured'}`,
-        data: stats
-      });
-    }
-    
-    // Scheduled payments query
-    if (messageL.includes('scheduled') || messageL.includes('upcoming payment')) {
-      const payments = await ScheduledPayment.find({ 
-        userId, 
-        status: 'scheduled' 
-      }).sort({ scheduledDate: 1 });
-      
-      if (payments.length === 0) {
-        return res.json({
-          type: 'info',
-          message: '📅 No scheduled payments found.'
-        });
-      }
-      
-      let msg = `📅 **Scheduled Payments** (${payments.length} total)\n\n`;
-      payments.slice(0, 5).forEach((p, i) => {
-        msg += `${i + 1}. ${p.payee} - ${p.amount} ${p.currency}\n`;
-        msg += `   Date: ${formatDateForDisplay(p.scheduledDate)}\n\n`;
-      });
-      
-      return res.json({
-        type: 'list',
-        message: msg,
-        data: payments
-      });
-    }
-    
-    // Send/Transfer/Pay command
-    if (messageL.includes('send') || messageL.includes('transfer') || messageL.includes('pay')) {
-      const parsed = parseInstructionWithScheduling(message);
-      
-      if (parsed.intents.length > 0) {
-        return res.json({
-          type: 'action',
-          message: `🔍 **Payment Detected**\n\nI found a payment request. Use the /api/parse endpoint to process this transaction.`,
-          parsed
-        });
-      }
-    }
-    
-    // Transaction history
-    if (messageL.includes('history') || messageL.includes('transaction')) {
-      return res.json({
-        type: 'info',
-        message: '📜 **Transaction History**\n\nView your recent transactions at /api/history'
-      });
-    }
-    
-    // No command detected - use AI chat
-    return res.json({
-      type: 'chat',
-      message: 'For natural conversation, use the /api/chat endpoint with message history.'
-    });
-    
+    const result = await securityMonitor.checkTransaction(userId, req.body);
+    res.json(result);
   } catch (error) {
-    console.error('[CHAT/SMART] Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
-// ==================== ORIGINAL ROUTES ====================
-
-// Parse user instruction with enhanced scheduling support
-app.post('/api/parse', async (req, res) => {
-  try {
-    const { text } = req.body;
-    const instructionId = `inst_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    console.log(`[PARSE] Processing: "${text}"`);
-    
-    // Use enhanced parser with scheduling support
-    const parsed = parseInstructionWithScheduling(text);
-    
-    // Store instruction
-    STORE.instructions[instructionId] = {
-      instructionId,
-      userId: 'demo-user',
-      rawText: text,
-      parsed,
-      status: 'parsed',
-      createdAt: new Date()
-    };
-    
-    console.log('[PARSE] Result:', JSON.stringify(parsed, null, 2));
-    
-    res.json({
-      instructionId,
-      parsed,
-      confidence: parsed.confidence,
-      hasScheduling: parsed.hasScheduling,
-      scheduledDate: parsed.scheduledDate,
-      naturalLanguageSummary: parsed.naturalLanguageSummary
-    });
-  } catch (error) {
-    console.error('[PARSE] Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Generate action plan (now handles scheduling)
-app.post('/api/plan', async (req, res) => {
-  try {
-    const { instructionId, parsed } = req.body;
-    
-    console.log(`[PLAN] Generating plan for: ${instructionId}`);
-    
-    const instruction = STORE.instructions[instructionId];
-    const parsedData = parsed || instruction?.parsed;
-    
-    if (!parsedData) {
-      return res.status(400).json({ error: 'No parsed data found' });
-    }
-    
-    // Check if this is a scheduling request
-    if (parsedData.hasScheduling && parsedData.scheduledDate) {
-      const plan = await generateScheduledPlan(parsedData, mockUser.id);
-      
-      if (instruction) {
-        instruction.plan = plan;
-        instruction.status = 'planned';
-      }
-      
-      res.json({
-        instructionId,
-        ...plan,
-        isScheduled: true,
-        scheduledDate: parsedData.scheduledDate,
-        message: parsedData.naturalLanguageSummary
-      });
-    } else {
-      const plan = generateActionPlan(parsedData);
-      
-      if (instruction) {
-        instruction.plan = plan;
-        instruction.status = 'planned';
-      }
-      
-      res.json({
-        instructionId,
-        actionPlan: plan.actions,
-        rationale: plan.rationale,
-        riskScore: plan.riskScore,
-        totalAmount: plan.totalAmount,
-        isScheduled: false
-      });
-    }
-  } catch (error) {
-    console.error('[PLAN] Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Approve and execute plan (handles both immediate and scheduled)
-app.post('/api/approve', async (req, res) => {
-  try {
-    const { instructionId, isScheduled, plan: providedPlan, scheduledPayment } = req.body;
-    
-    console.log(`[APPROVE] User: ${mockUser.id}, Instruction: ${instructionId}`);
-    
-    if (isScheduled) {
-      // Handle scheduled payment approval
-      const payment = await paymentScheduler.schedulePayment(mockUser.id, scheduledPayment);
-      
-      console.log(`[APPROVE] ✅ Payment scheduled: ${payment.paymentId}`);
-      
-      res.json({
-        success: true,
-        scheduled: true,
-        payment,
-        message: `Payment scheduled successfully for ${formatDateForDisplay(payment.scheduledDate)}`
-      });
-    } else {
-      // Handle immediate execution
-      const instruction = STORE.instructions[instructionId];
-      const plan = providedPlan || instruction?.plan || mockPlan;
-      
-      if (!plan || !plan.actions) {
-        return res.status(400).json({ error: 'No valid plan found' });
-      }
-      
-      // Execute the plan with instruction ID for blockchain logging
-      const result = await executePlan(plan, {
-        userId: mockUser.id,
-        agent: mockUser.agent,
-        wallet: mockUser.wallet,
-        instructionId  // Pass for blockchain logging
-      });
-      
-      // Store transaction records
-      if (result.results) {
-        result.results.forEach(r => {
-          const txId = uuidv4();
-          STORE.transactions[txId] = {
-            txId,
-            instructionId,
-            ...r,
-            createdAt: new Date()
-          };
-        });
-      }
-      
-      // Update instruction status
-      if (instruction) {
-        instruction.status = 'executed';
-        instruction.executionResult = result;
-        instruction.blockchainTx = result.blockchainTx;
-      }
-      
-      console.log(`[APPROVE] ✅ Success: ${result.summary.successful} transactions executed`);
-      
-      if (result.blockchainTx && result.blockchainTx.success) {
-        console.log(`[APPROVE] 🔗 View on blockchain: ${result.blockchainTx.explorerUrl}`);
-      }
-      
-      res.json({
-        success: true,
-        scheduled: false,
-        result,
-        blockchainTx: result.blockchainTx
-      });
-    }
-  } catch (error) {
-    console.error('[APPROVE] Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get transaction history
-app.get('/api/history', (req, res) => {
-  const userId = req.headers['x-user-id'] || 'demo-user';
-  const limit = parseInt(req.query.limit) || 10;
-  
-  const instructions = Object.values(STORE.instructions)
-    .filter(i => i.userId === userId)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, limit);
-  
-  res.json(instructions);
-});
-
-// Text-to-Speech endpoint
-app.post('/api/tts', async (req, res) => {
-  try {
-    const { text } = req.body;
-    
-    console.log(`[TTS] 🎤 Generating speech (${text.length} chars)...`);
-    
-    if (!process.env.ELEVENLABS_KEY) {
-      console.log('[TTS] ⚠️ Falling back to browser TTS');
-      return res.json({ fallback: true });
-    }
-    
-    const response = await axios.post(
-      'https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM',
-      { text, model_id: 'eleven_monolingual_v1' },
-      {
-        headers: {
-          'xi-api-key': process.env.ELEVENLABS_KEY,
-          'Content-Type': 'application/json'
-        },
-        responseType: 'arraybuffer'
-      }
-    );
-    
-    const audioBase64 = Buffer.from(response.data).toString('base64');
-    const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
-    
-    console.log('[TTS] ✅ Speech generated successfully');
-    
-    res.json({ url: audioUrl });
-  } catch (error) {
-    console.error('[TTS] Error:', error.message);
-    res.json({ fallback: true });
-  }
-});
-
-// ==================== SCHEDULER ROUTES ====================
-
-const schedulerRoutes = require('./routes/scheduler');
-app.use('/api/scheduler', schedulerRoutes);
-
-// ==================== HELPER FUNCTIONS ====================
-
-async function generateScheduledPlan(parsed, userId) {
-  const intent = parsed.intents[0];
-  
-  const scheduledPayment = {
-    type: intent.type,
-    payee: intent.payee,
-    amount: intent.amount,
-    currency: intent.currency || 'USDC',
-    scheduledDate: parsed.scheduledDate,
-    recurring: intent.recurring || { enabled: false },
-    description: parsed.raw
-  };
-  
-  return {
-    scheduledPayment,
-    actionPlan: [{
-      actionId: `scheduled_${Date.now()}`,
-      type: 'SCHEDULE',
-      ...scheduledPayment
-    }],
-    totalAmount: intent.amount || 0,
-    riskScore: 0.1,
-    rationale: parsed.naturalLanguageSummary,
-    estimatedGas: 0
-  };
-}
-
-function generateActionPlan(parsed) {
-  const actions = [];
-  let totalAmount = 0;
-  
-  parsed.intents.forEach((intent, idx) => {
-    const action = {
-      actionId: `action_${idx}_${Date.now()}`,
-      type: intent.type,
-      to: intent.payee || 'Savings',
-      amount: intent.amount,
-      percent: intent.percent,
-      currency: intent.currency || 'USDC'
-    };
-    
-    if (action.amount) {
-      totalAmount += action.amount;
-    }
-    
-    actions.push(action);
-  });
-  
-  const riskScore = totalAmount > 100 ? 0.7 : totalAmount > 50 ? 0.4 : 0.2;
-  
-  return {
-    actions,
-    totalAmount,
-    riskScore,
-    rationale: `Executing ${actions.length} action(s) with total amount of ${totalAmount.toFixed(2)} USDC`,
-    estimatedGas: 0.05
-  };
-}
-
-const mockPlan = {
-  actions: [
-    { actionId: 'mock_1', type: 'TRANSFER', to: 'Netflix', amount: 13.99, currency: 'USDC' }
-  ]
-};
 
 // ==================== START SERVER ====================
 
@@ -588,19 +521,21 @@ const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
   console.log('\n🚀 ============================================');
-  console.log(`   ArcBot Backend Server`);
+  console.log('   QubicPay AI Backend');
+  console.log('============================================');
   console.log(`   Port: ${PORT}`);
-  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   MongoDB: ${process.env.MONGODB_URI || 'mongodb://localhost:27017/arcbot'}`);
-  console.log(`   Circle API: ${process.env.CIRCLE_API_KEY ? 'Configured' : 'Not configured (Mock mode)'}`);
-  console.log(`   Cloudflare AI: ${process.env.CLOUDFLARE_WORKER_URL ? '✅ Configured' : '⚠️  Not configured'}`);
-  console.log(`   Arc Blockchain: ${process.env.DECISION_CONTRACT_ADDRESS ? '✅ Configured' : '⚠️  Not configured'}`);
-  console.log(`   Scheduler: ✅ Active`);
+  console.log(`   Blockchain: Qubic`);
+  console.log(`   Wallet: ${USER_WALLET_ADDRESS ? '✅ Connected' : '⚠️ Not configured'}`);
+  console.log(`   Firebase: ${paymentScheduler.initialized ? '✅ Ready' : '⏳ Initializing...'}`);
+  console.log(`   Qubic Payments: ${qubicPayments.initialized ? '✅ Ready' : '⏳ Initializing...'}`);
+  console.log(`   Security: ${securityMonitor.initialized ? '✅ Ready' : '⏳ Initializing...'}`);
+  console.log(`   Cross-Border: ✅ 6 countries supported`);
   console.log('============================================ 🚀\n');
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, closing server...');
   process.exit(0);
 });
+
+module.exports = app;

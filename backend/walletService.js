@@ -1,4 +1,4 @@
-// walletService.js - Real Arc Blockchain Wallet Integration (Secure TLS)
+// walletService.js - Qubic Blockchain Wallet Integration
 const { ethers } = require('ethers');
 
 // USDC ABI (standard ERC20)
@@ -9,46 +9,40 @@ const USDC_ABI = [
   'function name() view returns (string)'
 ];
 
-class ArcWalletService {
+class QubicWalletService {
   constructor() {
-    const rpcUrl = process.env.ARC_RPC || 'https://rpc.testnet.arc.network';
+    const rpcUrl = process.env.QUBIC_RPC_URL || 'https://testnet-rpc.qubic.xyz';
     
-    // ✅ SECURE: Create provider with proper HTTPS configuration
-    // This uses Node's default TLS settings (secure)
+    // Create provider with secure HTTPS configuration
     const fetchRequest = new ethers.FetchRequest(rpcUrl);
-    
-    // Set reasonable timeout
     fetchRequest.timeout = 30000; // 30 seconds
-    
-    // Add user agent for better logging
-    fetchRequest.setHeader('User-Agent', 'ArcBot-Wallet/1.0');
+    fetchRequest.setHeader('User-Agent', 'QubicPay-Wallet/1.0');
     
     // Create provider with secure fetch
     this.provider = new ethers.JsonRpcProvider(
       fetchRequest,
-      undefined, // Let ethers auto-detect network
+      undefined,
       {
-        staticNetwork: true, // Prevent network detection issues
-        batchMaxCount: 1 // Disable batching for better error messages
+        staticNetwork: true,
+        batchMaxCount: 1
       }
     );
     
-    this.chainId = parseInt(process.env.ARC_CHAIN_ID || '412346');
+    this.chainId = parseInt(process.env.QUBIC_CHAIN_ID || '42161');
     
-    console.log(`[WALLET] Connected to Arc RPC: ${rpcUrl}`);
+    console.log(`[WALLET] Connected to Qubic RPC: ${rpcUrl}`);
+    console.log(`[WALLET] Chain ID: ${this.chainId}`);
   }
 
   /**
-   * Validate address format - more lenient version
+   * Validate address format
    */
   isValidAddress(address) {
     if (!address || typeof address !== 'string') return false;
     
-    // Must start with 0x and be 42 characters total
     if (!address.toLowerCase().startsWith('0x')) return false;
     if (address.length !== 42) return false;
     
-    // Check if all characters after 0x are valid hex
     const hexPart = address.slice(2);
     const isValidHex = /^[0-9a-fA-F]{40}$/.test(hexPart);
     
@@ -56,41 +50,34 @@ class ArcWalletService {
   }
 
   /**
-   * Get checksummed address (fixes case sensitivity)
-   * BYPASS: Just use lowercase to avoid checksum issues
+   * Get checksummed address
    */
   getChecksumAddress(address) {
     try {
-      // Try to get proper checksum first
       return ethers.getAddress(address);
     } catch (error) {
-      // If checksum fails, just return lowercase version
-      // This works fine for RPC calls
       console.warn('[WALLET] Checksum validation failed, using lowercase');
       return address.toLowerCase();
     }
   }
 
   /**
-   * Get native ARC token balance
+   * Get native Qubic token balance
    */
   async getNativeBalance(address) {
     try {
-      // Validate address before making RPC call
       if (!this.isValidAddress(address)) {
         throw new Error(`Invalid address format: ${address}`);
       }
 
-      // Use checksummed address for RPC calls
       const checksumAddress = this.getChecksumAddress(address);
       
       const balance = await this.provider.getBalance(checksumAddress);
-      const balanceInArc = ethers.formatEther(balance);
-      return parseFloat(balanceInArc);
+      const balanceInQubic = ethers.formatEther(balance);
+      return parseFloat(balanceInQubic);
     } catch (error) {
-      // Check if error is ENS-related
       if (error.code === 'UNSUPPORTED_OPERATION' && error.operation === 'getEnsAddress') {
-        console.error('[WALLET] ENS not supported on Arc network. Use hex addresses only.');
+        console.error('[WALLET] ENS not supported on Qubic network. Use hex addresses only.');
         return 0;
       }
       console.error('[WALLET] Error fetching native balance:', error.message);
@@ -103,7 +90,6 @@ class ArcWalletService {
    */
   async getUSDCBalance(address, usdcContractAddress) {
     try {
-      // Validate addresses
       if (!this.isValidAddress(address)) {
         console.error(`[WALLET] Invalid wallet address: ${address}`);
         return 0;
@@ -112,13 +98,12 @@ class ArcWalletService {
       if (!usdcContractAddress || usdcContractAddress === '0x...' || !this.isValidAddress(usdcContractAddress)) {
         console.warn('[WALLET] USDC contract address not configured or invalid');
         console.warn(`[WALLET] Received: ${usdcContractAddress}`);
-        console.warn('[WALLET] Set ARC_USDC_CONTRACT in .env file');
+        console.warn('[WALLET] Set QUBIC_USDC_ADDRESS in .env file');
         return 0;
       }
 
       console.log(`[WALLET] Fetching USDC balance from contract: ${usdcContractAddress}`);
 
-      // Use checksummed addresses
       const checksumWallet = this.getChecksumAddress(address);
       const checksumContract = this.getChecksumAddress(usdcContractAddress);
 
@@ -128,17 +113,13 @@ class ArcWalletService {
         this.provider
       );
 
-      // Try to get decimals first to verify contract exists
       let decimals;
       try {
         decimals = await usdcContract.decimals();
         console.log(`[WALLET] USDC contract decimals: ${decimals}`);
       } catch (decimalError) {
         console.error('[WALLET] Failed to read decimals from contract:', decimalError.message);
-        console.warn('[WALLET] This might not be a valid ERC20 contract or contract does not exist');
-        
-        // Try with default USDC decimals (6)
-        decimals = 6;
+        decimals = 6; // Default USDC decimals
         console.log('[WALLET] Using default USDC decimals: 6');
       }
 
@@ -155,8 +136,6 @@ class ArcWalletService {
         return 0;
       }
       console.error('[WALLET] Error fetching USDC balance:', error.message);
-      console.error('[WALLET] Contract address:', usdcContractAddress);
-      console.error('[WALLET] Wallet address:', address);
       return 0;
     }
   }
@@ -168,7 +147,6 @@ class ArcWalletService {
     try {
       console.log(`[WALLET] Fetching wallet info for: ${address}`);
 
-      // Validate address first
       if (!this.isValidAddress(address)) {
         throw new Error(`Invalid wallet address format: ${address}. Use hex address (0x...)`);
       }
@@ -176,42 +154,31 @@ class ArcWalletService {
       const checksumAddress = this.getChecksumAddress(address);
       console.log(`[WALLET] Using checksummed address: ${checksumAddress}`);
 
-      // Use Promise.allSettled to handle partial failures gracefully
-      const [arcResult, usdcResult, txCountResult] = await Promise.allSettled([
+      // Use Promise.allSettled for graceful failure handling
+      const [qubicResult, usdcResult, txCountResult] = await Promise.allSettled([
         this.getNativeBalance(checksumAddress),
         usdcContractAddress ? this.getUSDCBalance(checksumAddress, usdcContractAddress) : Promise.resolve(0),
         this.provider.getTransactionCount(checksumAddress).catch(() => 0)
       ]);
 
-      // Extract values or use defaults
-      const arcBalance = arcResult.status === 'fulfilled' ? arcResult.value : 0;
-      let usdcBalance = usdcResult.status === 'fulfilled' ? usdcResult.value : 0;
+      const qubicBalance = qubicResult.status === 'fulfilled' ? qubicResult.value : 0;
+      const usdcBalance = usdcResult.status === 'fulfilled' ? usdcResult.value : 0;
       const transactionCount = txCountResult.status === 'fulfilled' ? txCountResult.value : 0;
 
-      // WORKAROUND: If USDC contract doesn't work, native balance might BE the USDC
-      // On Arc testnet, the native token appears to be USDC
-      if (usdcBalance === 0 && arcBalance > 0) {
-        console.log('[WALLET] ⚠️ USDC contract not responding, using native balance as USDC');
-        usdcBalance = arcBalance;
-        // Set arcBalance to 0 since the native token IS USDC on this network
-      }
-
-      // Get network info safely - don't rely on auto-detection
-      let networkInfo = { name: 'Arc Testnet', chainId: this.chainId };
+      // Get network info
+      let networkInfo = { name: 'Qubic Testnet', chainId: this.chainId };
       try {
-        // Query the actual chain ID from RPC
         const network = await this.provider.getNetwork();
         const actualChainId = Number(network.chainId);
         
         networkInfo = {
-          name: actualChainId === 5042002 ? 'Arc Testnet' : network.name || 'Arc Testnet',
+          name: actualChainId === 42161 ? 'Qubic Testnet' : network.name || 'Qubic Testnet',
           chainId: actualChainId
         };
         
-        // Log if there's a mismatch
         if (actualChainId !== this.chainId) {
           console.warn(`[WALLET] Chain ID mismatch: expected ${this.chainId}, got ${actualChainId}`);
-          console.warn('[WALLET] Update ARC_CHAIN_ID in .env to match the actual network');
+          console.warn('[WALLET] Update QUBIC_CHAIN_ID in .env to match the actual network');
         }
       } catch (networkError) {
         console.warn('[WALLET] Could not fetch network info, using defaults');
@@ -220,17 +187,18 @@ class ArcWalletService {
       const walletInfo = {
         address: checksumAddress,
         balances: {
-          arc: 0, // Native token is USDC on this network
+          qubic: qubicBalance,
           usdc: usdcBalance
         },
         transactionCount,
         network: networkInfo,
+        blockchain: 'qubic',
         lastUpdated: new Date().toISOString()
       };
 
       console.log('[WALLET] ✅ Wallet info fetched:', {
         address: checksumAddress.slice(0, 10) + '...',
-        arc: 0,
+        qubic: qubicBalance,
         usdc: usdcBalance,
         txCount: transactionCount
       });
@@ -239,18 +207,18 @@ class ArcWalletService {
     } catch (error) {
       console.error('[WALLET] Error fetching wallet info:', error.message);
       
-      // Return minimal info instead of throwing
       return {
         address,
         balances: {
-          arc: 0,
+          qubic: 0,
           usdc: 0
         },
         transactionCount: 0,
         network: {
-          name: 'Arc Testnet',
+          name: 'Qubic Testnet',
           chainId: this.chainId
         },
+        blockchain: 'qubic',
         lastUpdated: new Date().toISOString(),
         error: error.message
       };
@@ -258,11 +226,10 @@ class ArcWalletService {
   }
 
   /**
-   * Get recent transactions (last N blocks)
+   * Get recent transactions
    */
   async getRecentTransactions(address, blocksToSearch = 1000) {
     try {
-      // Validate address
       if (!this.isValidAddress(address)) {
         console.error('[WALLET] Invalid address for transaction search');
         return [];
@@ -276,7 +243,6 @@ class ArcWalletService {
 
       const transactions = [];
       
-      // Search recent blocks for transactions
       for (let i = currentBlock; i > fromBlock && transactions.length < 10; i--) {
         try {
           const block = await this.provider.getBlock(i, true);
@@ -289,7 +255,8 @@ class ArcWalletService {
                   to: tx.to,
                   value: ethers.formatEther(tx.value || 0),
                   blockNumber: i,
-                  timestamp: block.timestamp
+                  timestamp: block.timestamp,
+                  blockchain: 'qubic'
                 });
                 
                 if (transactions.length >= 10) break;
@@ -343,7 +310,6 @@ class ArcWalletService {
    */
   async estimateGas(tx) {
     try {
-      // Validate and checksum addresses in transaction
       if (tx.to) {
         if (!this.isValidAddress(tx.to)) {
           throw new Error('Invalid recipient address');
@@ -368,13 +334,13 @@ class ArcWalletService {
   /**
    * Check if wallet has sufficient balance
    */
-  async hasSufficientBalance(address, amount, tokenType = 'arc') {
+  async hasSufficientBalance(address, amount, tokenType = 'usdc') {
     try {
-      if (tokenType === 'arc') {
+      if (tokenType === 'qubic') {
         const balance = await this.getNativeBalance(address);
         return balance >= parseFloat(amount);
       } else if (tokenType === 'usdc') {
-        const usdcContract = process.env.ARC_USDC_CONTRACT;
+        const usdcContract = process.env.QUBIC_USDC_ADDRESS;
         if (!usdcContract) return false;
         
         const balance = await this.getUSDCBalance(address, usdcContract);
@@ -393,12 +359,12 @@ let walletServiceInstance = null;
 
 function getWalletService() {
   if (!walletServiceInstance) {
-    walletServiceInstance = new ArcWalletService();
+    walletServiceInstance = new QubicWalletService();
   }
   return walletServiceInstance;
 }
 
 module.exports = {
-  ArcWalletService,
+  QubicWalletService,
   getWalletService
 };

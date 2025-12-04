@@ -1,4 +1,4 @@
-// firebaseService.js - Firebase Integration for ArcBot with AI Memory & Scheduled Payments
+// firebaseService.js - Firebase Integration for QubicPay AI with Memory & Scheduled Payments
 const admin = require('firebase-admin');
 const cron = require('node-cron');
 
@@ -10,7 +10,11 @@ class FirebaseService {
       scheduledPayments: 'scheduled_payments',
       savedTransfers: 'saved_transfers',
       conversations: 'conversations',
-      paymentHistory: 'payment_history'
+      paymentHistory: 'payment_history',
+      recipients: 'recipients',
+      remittances: 'remittances',
+      securityAlerts: 'security_alerts',
+      securityChecks: 'security_checks'
     };
   }
 
@@ -46,8 +50,9 @@ class FirebaseService {
       this.db = admin.firestore();
       this.initialized = true;
 
-      console.log('✅ Firebase initialized successfully');
+      console.log('✅ Firebase initialized successfully (Qubic)');
       console.log(`📦 Project: ${admin.app().options.credential.projectId}`);
+      console.log(`🔗 Blockchain: Qubic`);
 
       // Initialize cron jobs for scheduled payments
       this.initializeCronJobs();
@@ -76,6 +81,9 @@ class FirebaseService {
       status: 'scheduled',
       description: paymentData.description || '',
       tags: paymentData.tags || [],
+      blockchain: 'qubic',
+      decisionId: null,
+      decisionTxHash: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       executedAt: null,
       failureReason: null
@@ -83,7 +91,7 @@ class FirebaseService {
 
     await this.db.collection(this.collections.scheduledPayments).doc(paymentId).set(payment);
     
-    console.log(`✅ Payment scheduled: ${paymentId} for ${paymentData.scheduledDate}`);
+    console.log(`✅ Payment scheduled: ${paymentId} for ${paymentData.scheduledDate} (Qubic)`);
     return { ...payment, paymentId };
   }
 
@@ -131,16 +139,17 @@ class FirebaseService {
     const payment = paymentDoc.data();
     
     try {
-      console.log(`💸 Executing payment: ${paymentId}`);
+      console.log(`💸 Executing payment via Qubic: ${paymentId}`);
       console.log(`   To: ${payment.payee}`);
       console.log(`   Amount: ${payment.amount} ${payment.currency}`);
       
-      // TODO: Integrate with your actual payment execution logic here
+      // TODO: Integrate with Qubic payment execution
       // For now, mark as completed
       
       await paymentRef.update({
         status: 'completed',
-        executedAt: admin.firestore.FieldValue.serverTimestamp()
+        executedAt: admin.firestore.FieldValue.serverTimestamp(),
+        blockchain: 'qubic'
       });
       
       // Log to payment history
@@ -150,7 +159,8 @@ class FirebaseService {
         payee: payment.payee,
         amount: payment.amount,
         currency: payment.currency,
-        status: 'completed'
+        status: 'completed',
+        blockchain: 'qubic'
       });
       
       // Handle recurring payments
@@ -250,6 +260,7 @@ class FirebaseService {
       currency: transferData.currency || 'USDC',
       category: transferData.category || 'other',
       favorite: transferData.favorite || false,
+      blockchain: 'qubic',
       lastUsed: null,
       useCount: 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -257,7 +268,7 @@ class FirebaseService {
 
     await this.db.collection(this.collections.savedTransfers).doc(transferId).set(transfer);
     
-    console.log(`✅ Transfer saved: ${transferId}`);
+    console.log(`✅ Transfer saved: ${transferId} (Qubic)`);
     return transfer;
   }
 
@@ -265,7 +276,7 @@ class FirebaseService {
     const snapshot = await this.db.collection(this.collections.savedTransfers)
       .where('userId', '==', userId)
       .orderBy('favorite', 'desc')
-      .orderBy('lastUsed', 'desc')
+      .orderBy('useCount', 'desc')
       .get();
     
     return snapshot.docs.map(doc => doc.data());
@@ -289,6 +300,7 @@ class FirebaseService {
       conversationId,
       userId,
       messages,
+      blockchain: 'qubic',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       lastUpdated: admin.firestore.FieldValue.serverTimestamp()
     };
@@ -325,6 +337,7 @@ class FirebaseService {
       historyId,
       userId,
       ...paymentData,
+      blockchain: 'qubic',
       timestamp: admin.firestore.FieldValue.serverTimestamp()
     };
 
@@ -360,17 +373,20 @@ class FirebaseService {
         amount: p.amount,
         currency: p.currency,
         scheduledDate: p.scheduledDate,
-        recurring: p.recurring
+        recurring: p.recurring,
+        blockchain: 'qubic'
       })),
       recentPayments: recentHistory.slice(0, 5).map(h => ({
         payee: h.payee,
         amount: h.amount,
         currency: h.currency,
-        status: h.status
+        status: h.status,
+        blockchain: h.blockchain || 'qubic'
       })),
       frequentPayees: savedTransfers
         .filter(t => t.useCount > 2)
-        .map(t => t.nickname || t.payee)
+        .map(t => t.nickname || t.payee),
+      blockchain: 'qubic'
     };
   }
 
@@ -387,7 +403,7 @@ class FirebaseService {
       await this.sendDailyReminders();
     });
 
-    console.log('✅ Cron jobs initialized');
+    console.log('✅ Cron jobs initialized (Qubic)');
     console.log('   - Payment execution: Every minute');
     console.log('   - Daily reminders: 9:00 AM');
   }

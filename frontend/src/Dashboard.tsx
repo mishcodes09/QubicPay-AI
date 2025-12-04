@@ -467,6 +467,10 @@ function PaymentRequestCard({
           <DollarSign className="text-purple-400" size={20} />
         </div>
         <h4 className="font-bold text-purple-300">Payment Request</h4>
+        {/* ✅ ADDED: Qubic badge */}
+        <span className="ml-auto px-2 py-1 bg-cyan-500/20 text-cyan-300 text-xs rounded-full font-semibold border border-cyan-500/50">
+          ⚡ Qubic
+        </span>
       </div>
       
       <div className="space-y-2 mb-4">
@@ -486,6 +490,14 @@ function PaymentRequestCard({
         )}
       </div>
       
+      {/* ✅ ADDED: Qubic blockchain info */}
+      <div className="bg-cyan-500/10 rounded-lg p-3 mb-4 border border-cyan-500/30">
+        <p className="text-xs text-cyan-300 flex items-center gap-2">
+          <Zap size={14} />
+          This payment will be logged on Qubic blockchain with full audit trail
+        </p>
+      </div>
+      
       <div className="flex gap-2">
         <button
           onClick={onApprove}
@@ -495,7 +507,7 @@ function PaymentRequestCard({
           {processing ? (
             <>
               <Loader className="animate-spin" size={16} />
-              Processing...
+              Processing on Qubic...
             </>
           ) : (
             <>
@@ -903,14 +915,16 @@ const toggleVoiceListening = async () => {
     addBotMessage("Schedule cancelled. Is there anything else I can help you with?");
   };
 
+  // FIXED: handleApprovePayment now uses correct Qubic endpoint
   const handleApprovePayment = async (messageId: number, paymentData: PaymentData) => {
-    console.log('🔄 Starting payment approval:', { messageId, paymentData });
+    console.log('🔄 Starting Qubic payment approval:', { messageId, paymentData });
     setProcessingPayment(messageId);
     
     try {
-      console.log('📤 Sending payment request to backend...');
+      console.log('📤 Sending payment request to Qubic backend...');
       
-      const response = await fetch(`${API_BASE}/thirdweb/payment/send`, {
+      // ✅ FIXED: Changed from /thirdweb/payment/send to /qubic/payment/send
+      const response = await fetch(`${API_BASE}/qubic/payment/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -921,47 +935,57 @@ const toggleVoiceListening = async () => {
         })
       });
       
-      console.log('📥 Backend response status:', response.status);
+      console.log('📥 Qubic backend response status:', response.status);
       const result = await response.json();
-      console.log('📥 Backend response data:', result);
+      console.log('📥 Qubic backend response data:', result);
       
       if (result.success) {
+        // ✅ ENHANCED: Show both Decision TX and Payment TX
+        const successMessage = `✅ Payment Successful on Qubic!\n\n` +
+          `Sent ${paymentData.amount} ${paymentData.currency} to ${paymentData.recipient}\n\n` +
+          `🔗 Blockchain Transactions:\n` +
+          `• Decision Log: ${result.decisionTxHash ? result.decisionTxHash.slice(0, 10) + '...' : 'N/A'}\n` +
+          `• Payment TX: ${result.txHash ? result.txHash.slice(0, 10) + '...' : 'N/A'}\n\n` +
+          `${result.explorerUrl ? `🔍 View on Qubic Explorer:\n${result.explorerUrl}` : ''}`;
+        
         setMessages(prev => prev.map(msg => 
           msg.id === messageId 
             ? { 
                 ...msg, 
                 type: 'bot',
-                content: `✅ Payment Successful!\n\nSent ${paymentData.amount} ${paymentData.currency} to ${paymentData.recipient}\n\n${result.txHash ? `Transaction: ${result.txHash}\n` : ''}${result.explorerUrl ? `View on Explorer: ${result.explorerUrl}` : ''}`
+                content: successMessage
               }
             : msg
         ));
         
-        addBotMessage(`Payment completed successfully! ${result.newBalance ? `Your new balance is ${result.newBalance} USDC.` : ''}`);
         
+        addBotMessage(`Payment completed on Qubic blockchain! ${result.newBalance ? `Your new balance is ${result.newBalance} USDC.` : ''} Both decision log and payment are now verified on-chain.`);
+        
+        // Refresh wallet and history
         try {
           const freshResponse = await fetch(`${API_BASE}/me?refresh=true`);
           const freshData = await freshResponse.json();
           setProfile(freshData);
           loadPaymentHistory();
-          loadSavedTransfers(); // Refresh saved transfers too!
+          loadSavedTransfers();
         } catch (refreshError) {
           console.error('Balance refresh failed:', refreshError);
         }
       } else {
-        addBotMessage(`❌ Payment failed: ${result.error}`);
+        addBotMessage(`❌ Payment failed on Qubic: ${result.error}`);
         
         setMessages(prev => prev.map(msg => 
           msg.id === messageId 
             ? { 
                 ...msg, 
                 type: 'bot',
-                content: `❌ Payment Failed: ${result.error}`
+                content: `❌ Payment Failed on Qubic: ${result.error}`
               }
             : msg
         ));
       }
     } catch (error: any) {
-      console.error('❌ Payment error:', error);
+      console.error('❌ Qubic payment error:', error);
       addBotMessage(`❌ Payment failed: ${error.message}`);
       
       setMessages(prev => prev.map(msg => 
@@ -969,7 +993,7 @@ const toggleVoiceListening = async () => {
           ? { 
               ...msg, 
               type: 'bot',
-              content: `❌ Payment Error: ${error.message}`
+              content: `❌ Qubic Payment Error: ${error.message}`
             }
           : msg
       ));
@@ -1369,11 +1393,18 @@ const toggleVoiceListening = async () => {
                 <h1 className="text-2xl font-black bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
                   ArcBot AI
                 </h1>
-                <p className="text-xs text-slate-400">Intelligent Payment Assistant</p>
+                {/* ✅ ADDED: Qubic blockchain indicator */}
+                <p className="text-xs text-slate-400 flex items-center gap-2">
+                  Intelligent Payment Assistant
+                  <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-300 rounded-full text-[10px] font-semibold border border-cyan-500/50">
+                    ⚡ Qubic Blockchain
+                  </span>
+                </p>
               </div>
             </div>
             
             <div className="flex items-center gap-3">
+              {/* Voice button - keep as is */}
               <button
                 onClick={toggleVoiceListening}
                 className={`relative px-4 py-2 rounded-xl transition-all flex items-center gap-2 ${
@@ -1387,6 +1418,7 @@ const toggleVoiceListening = async () => {
                 {isListening && <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />}
               </button>
               
+              {/* Balance display - keep as is */}
               {profile && (
                 <div className="bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700/50">
                   <div className="text-xs text-slate-400">Balance</div>
@@ -1397,6 +1429,7 @@ const toggleVoiceListening = async () => {
           </div>
         </div>
       </div>
+
       
       <div className="max-w-7xl mx-auto p-4">
         <div className="flex gap-2 mb-6">

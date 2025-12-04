@@ -1,133 +1,192 @@
-// services/remittanceService.js - Complete Remittance Orchestration
+// services/remittanceService.js - Qubic-Powered Remittance Orchestration
 const { getExchangeRateService } = require('./exchangeRateService');
 const { getCrossBorderService } = require('./crossBorderService');
+const { getQubicPaymentService } = require('./qubicPayments');
+const { getFirebaseScheduler } = require('./firebaseScheduler');
 
 class RemittanceService {
-  constructor(thirdwebPayments, firebaseService) {
-    this.payments = thirdwebPayments;
-    this.firebase = firebaseService;
+  constructor() {
+    this.qubicPayments = getQubicPaymentService();
     this.exchangeRates = getExchangeRateService();
-    this.crossBorder = getCrossBorderService(firebaseService);
+    this.crossBorder = null; // Initialized with firebase
+    this.scheduler = getFirebaseScheduler();
   }
 
-  // ==================== SEND REMITTANCE ====================
+  async initialize(firebaseService) {
+    this.crossBorder = getCrossBorderService(firebaseService);
+    await this.qubicPayments.initialize();
+    console.log('[REMITTANCE] ✅ Service initialized with Qubic');
+  }
+
+  // ==================== SEND REMITTANCE (QUBIC) ====================
 
   /**
-   * Complete remittance flow: Calculate → Execute → Deliver
+   * Complete remittance flow: Log Decision → Execute on Qubic → Deliver
    */
   async sendRemittance(userId, remittanceData) {
-    console.log(`[REMITTANCE] 🌍 Starting cross-border transfer for user: ${userId}`);
+    console.log(`[REMITTANCE] 🌍 Starting Qubic cross-border transfer for user: ${userId}`);
     
     try {
       // Step 1: Get recipient details
       console.log('[REMITTANCE] 📋 Step 1: Fetching recipient details...');
-      const recipient = await this.crossBorder.getRecipient(remittanceData.recipientId);
+      const recipient = await this.crossBorder.getRecipientById(remittanceData.recipientId);
       
       if (!recipient) {
         throw new Error('Recipient not found');
       }
 
-      console.log(`[REMITTANCE] ✅ Recipient: ${recipient.name} in ${recipient.country}`);
+      console.log(`[REMITTANCE] ✅ Recipient: ${recipient.name} in ${recipient.countryName}`);
 
       // Step 2: Calculate exchange rate and fees
       console.log('[REMITTANCE] 💱 Step 2: Calculating exchange rate and fees...');
       const calculation = await this.exchangeRates.calculateRemittance(
         remittanceData.amount,
-        recipient.currency
+        recipient.currency,
+        recipient.countryCode
       );
 
       console.log('[REMITTANCE] 📊 Calculation:', {
         sendAmount: calculation.sendAmount,
         receiveAmount: calculation.receiveAmount,
         exchangeRate: calculation.exchangeRate,
-        totalFees: calculation.totalFees
+        fee: calculation.fee
       });
 
-      // Step 3: Check transaction limits
-      console.log('[REMITTANCE] 🔒 Step 3: Checking transaction limits...');
-      const limitCheck = await this.crossBorder.checkTransactionLimits(
-        userId,
+      // Step 3: Validate amount limits
+      const validation = this.crossBorder.validateRemittanceAmount(
+        recipient.countryCode,
         remittanceData.amount
       );
 
-      if (!limitCheck.allowed) {
-        throw new Error(limitCheck.reason);
+      if (!validation.valid) {
+        throw new Error(validation.error);
       }
 
-      console.log('[REMITTANCE] ✅ Transaction within limits');
+      console.log('[REMITTANCE] ✅ Amount within limits');
 
-      // Step 4: Create remittance record
+      // Step 4: Create remittance record in Firebase
       console.log('[REMITTANCE] 📝 Step 4: Creating remittance record...');
-      const remittance = await this.crossBorder.createRemittance(userId, {
+      const remittance = await this.crossBorder.logRemittance(userId, {
         recipientId: remittanceData.recipientId,
+        recipientName: recipient.name,
+        recipientCountry: recipient.countryName,
+        recipientCurrency: recipient.currency,
         sendAmount: calculation.sendAmount,
         receiveAmount: calculation.receiveAmount,
         exchangeRate: calculation.exchangeRate,
-        platformFee: calculation.platformFee,
+        fee: calculation.fee,
+        feePercentage: calculation.feePercentage,
         networkFee: calculation.networkFee,
+        deliveryMethod: recipient.preferredMethod,
+        estimatedDeliveryTime: '5-15 minutes',
         description: remittanceData.description || `Remittance to ${recipient.name}`,
-        tags: remittanceData.tags || []
+        status: 'pending'
       });
 
       console.log(`[REMITTANCE] ✅ Remittance record created: ${remittance.remittanceId}`);
 
-      // Step 5: Execute blockchain payment
-      console.log('[REMITTANCE] ⛓️ Step 5: Executing blockchain transaction...');
-      
-      // Update status to processing
-      await this.crossBorder.updateRemittanceStatus(
-        remittance.remittanceId,
-        'processing'
-      );
+      // Step 5: Upload AI rationale to IPFS
+      console.log('[REMITTANCE] 📤 Step 5: Uploading decision rationale to IPFS...');
+      const rationale = `
+AI Decision: Cross-border remittance
+Recipient: ${recipient.name} (${recipient.countryName})
+Amount: ${calculation.sendAmount} USDC → ${calculation.receiveAmount} ${recipient.currency}
+Exchange Rate: ${calculation.exchangeRate}
+Fee: ${calculation.fee} USDC (${calculation.feePercentage})
+Risk Assessment: Low (verified recipient, amount within limits)
+Timestamp: ${new Date().toISOString()}
+      `.trim();
 
-      // Create payment request
-      const paymentRequest = await this.payments.createPaymentRequest({
-        to: recipient.walletAddress,
-        amount: remittanceData.amount,
-        currency: 'USDC',
-        description: `Cross-border remittance: ${remittance.remittanceId}`,
-        metadata: {
-          remittanceId: remittance.remittanceId,
-          recipientCountry: recipient.country,
-          recipientName: recipient.name,
-          type: 'remittance'
-        }
+      const ipfsResult = await this.qubicPayments.uploadRationaleToIPFS(rationale);
+      const rationaleCID = ipfsResult.success ? ipfsResult.cid : '';
+
+      console.log('[REMITTANCE] IPFS CID:', rationaleCID || 'N/A');
+
+      // Step 6: Log decision on Qubic blockchain
+      console.log('[REMITTANCE] ⛓️ Step 6: Logging decision on Qubic blockchain...');
+      
+      const decisionResult = await this.qubicPayments.logDecision({
+        decisionId: remittance.remittanceId,
+        actionSummary: `Remittance: ${calculation.sendAmount} USDC to ${recipient.name} in ${recipient.countryName}`,
+        rationaleCID,
+        amount: calculation.sendAmount,
+        riskScore: 12 // Low risk for standard remittance
       });
 
-      // Execute payment
-      const paymentResult = await this.payments.executePayment(paymentRequest);
+      if (!decisionResult.success) {
+        throw new Error(`Decision logging failed: ${decisionResult.error}`);
+      }
 
-      if (paymentResult.status === 'completed') {
-        console.log(`[REMITTANCE] ✅ Blockchain transaction successful: ${paymentResult.txHash}`);
+      console.log('[REMITTANCE] ✅ Decision logged on-chain');
+      console.log('   TX Hash:', decisionResult.txHash);
+      console.log('   Explorer:', decisionResult.explorerUrl);
 
-        // Update remittance with transaction details
+      // Update remittance with decision TX
+      await this.crossBorder.updateRemittanceStatus(
+        remittance.remittanceId,
+        'processing',
+        {
+          decisionTxHash: decisionResult.txHash,
+          decisionExplorerUrl: decisionResult.explorerUrl,
+          rationaleCID
+        }
+      );
+
+      // Step 7: Execute payment via PaymentRouter on Qubic
+      console.log('[REMITTANCE] 💸 Step 7: Executing instant transfer via PaymentRouter...');
+      
+      const transferResult = await this.qubicPayments.instantTransfer({
+        recipient: recipient.walletAddress,
+        amount: calculation.sendAmount,
+        decisionId: remittance.remittanceId
+      });
+
+      if (transferResult.success) {
+        console.log('[REMITTANCE] ✅ Payment executed successfully');
+        console.log('   TX Hash:', transferResult.txHash);
+        console.log('   Block:', transferResult.blockNumber);
+        console.log('   Gas used:', transferResult.gasUsed);
+
+        // Update decision status to EXECUTED
+        await this.qubicPayments.updateDecisionStatus(
+          remittance.remittanceId,
+          'executed',
+          transferResult.txHash
+        );
+
+        // Update remittance status
         await this.crossBorder.updateRemittanceStatus(
           remittance.remittanceId,
           'completed',
           {
-            txHash: paymentResult.txHash,
-            explorerUrl: paymentResult.explorerUrl,
-            deliveryConfirmation: paymentResult.blockNumber?.toString()
+            txHash: transferResult.txHash,
+            explorerUrl: transferResult.explorerUrl,
+            blockNumber: transferResult.blockNumber,
+            gasUsed: transferResult.gasUsed
           }
         );
 
-        // Update recipient usage stats
-        await this.crossBorder.updateRecipientUsage(recipient.recipientId);
+        // Update recipient stats
+        await this.crossBorder.updateRecipientStats(
+          recipient.recipientId,
+          calculation.sendAmount
+        );
 
         // Log to payment history
-        await this.firebase.logPaymentHistory(userId, {
+        await this.scheduler.logPaymentHistory(userId, {
           paymentId: remittance.remittanceId,
           type: 'remittance',
           payee: recipient.walletAddress,
           payeeName: recipient.name,
-          payeeCountry: recipient.country,
-          amount: remittanceData.amount,
+          payeeCountry: recipient.countryName,
+          amount: calculation.sendAmount,
           currency: 'USDC',
           receiveAmount: calculation.receiveAmount,
           receiveCurrency: recipient.currency,
           status: 'completed',
-          txHash: paymentResult.txHash,
-          explorerUrl: paymentResult.explorerUrl
+          txHash: transferResult.txHash,
+          explorerUrl: transferResult.explorerUrl,
+          decisionTxHash: decisionResult.txHash
         });
 
         console.log('[REMITTANCE] 🎉 Remittance completed successfully!');
@@ -137,37 +196,54 @@ class RemittanceService {
           remittance: {
             ...remittance,
             status: 'completed',
-            txHash: paymentResult.txHash,
-            explorerUrl: paymentResult.explorerUrl
+            txHash: transferResult.txHash,
+            explorerUrl: transferResult.explorerUrl,
+            decisionTxHash: decisionResult.txHash,
+            decisionExplorerUrl: decisionResult.explorerUrl,
+            rationaleCID
           },
           calculation,
           blockchain: {
-            txHash: paymentResult.txHash,
-            explorerUrl: paymentResult.explorerUrl,
-            blockNumber: paymentResult.blockNumber,
-            gasUsed: paymentResult.gasUsed
+            decisionTx: {
+              hash: decisionResult.txHash,
+              explorerUrl: decisionResult.explorerUrl
+            },
+            paymentTx: {
+              hash: transferResult.txHash,
+              explorerUrl: transferResult.explorerUrl,
+              blockNumber: transferResult.blockNumber,
+              gasUsed: transferResult.gasUsed
+            }
           },
-          message: `Successfully sent ${calculation.sendAmount} USDC to ${recipient.name} in ${recipient.country}. They will receive ${calculation.breakdown.receiveAmount}.`
+          message: `Successfully sent ${calculation.sendAmount} USDC to ${recipient.name} in ${recipient.countryName}. They will receive ${calculation.receiveAmount} ${recipient.currency}.`
         };
       } else {
-        console.error('[REMITTANCE] ❌ Blockchain transaction failed:', paymentResult.error);
+        console.error('[REMITTANCE] ❌ Payment execution failed:', transferResult.error);
 
-        // Update remittance status to failed
+        // Update decision status to FAILED
+        await this.qubicPayments.updateDecisionStatus(
+          remittance.remittanceId,
+          'failed',
+          ''
+        );
+
+        // Update remittance status
         await this.crossBorder.updateRemittanceStatus(
           remittance.remittanceId,
           'failed',
           {
-            failureReason: paymentResult.error || 'Unknown error'
+            failureReason: transferResult.error
           }
         );
 
         return {
           success: false,
-          error: paymentResult.error || 'Payment execution failed',
+          error: transferResult.error || 'Payment execution failed',
           remittance: {
             ...remittance,
             status: 'failed'
-          }
+          },
+          decisionTxHash: decisionResult.txHash
         };
       }
     } catch (error) {
@@ -183,47 +259,47 @@ class RemittanceService {
 
   // ==================== REMITTANCE PREVIEW ====================
 
-  /**
-   * Preview remittance without executing (for user approval)
-   */
   async previewRemittance(userId, recipientId, amount) {
     try {
-      // Get recipient
-      const recipient = await this.crossBorder.getRecipient(recipientId);
+      const recipient = await this.crossBorder.getRecipientById(recipientId);
       
       if (!recipient) {
         throw new Error('Recipient not found');
       }
 
-      // Calculate rates and fees
       const calculation = await this.exchangeRates.calculateRemittance(
         amount,
-        recipient.currency
+        recipient.currency,
+        recipient.countryCode
       );
 
-      // Check limits
-      const limitCheck = await this.crossBorder.checkTransactionLimits(userId, amount);
-
-      // Get comparison with traditional services
-      const comparison = await this.exchangeRates.compareWithTraditional(
-        amount,
-        recipient.currency
+      const validation = this.crossBorder.validateRemittanceAmount(
+        recipient.countryCode,
+        amount
       );
+
+      // Get PaymentRouter pool stats
+      const poolStats = await this.qubicPayments.getPoolStats();
 
       return {
         success: true,
         preview: {
           recipient: {
             name: recipient.name,
-            country: recipient.country,
+            country: recipient.countryName,
             currency: recipient.currency,
             deliveryMethod: recipient.preferredMethod
           },
           calculation,
-          limits: limitCheck,
-          comparison,
+          validation,
+          poolLiquidity: poolStats.success ? poolStats.reserves : 'N/A',
           estimatedDelivery: '5-15 minutes',
-          totalSteps: 5
+          blockchainSteps: [
+            '1. Log AI decision on Qubic (DecisionLogger)',
+            '2. Upload rationale to IPFS',
+            '3. Execute instant transfer (PaymentRouter)',
+            '4. Update decision status'
+          ]
         }
       };
     } catch (error) {
@@ -235,11 +311,8 @@ class RemittanceService {
     }
   }
 
-  // ==================== QUICK SEND (SAVED RECIPIENT) ====================
+  // ==================== QUICK SEND ====================
 
-  /**
-   * Quick send to a saved recipient
-   */
   async quickSend(userId, recipientId, amount) {
     return await this.sendRemittance(userId, {
       recipientId,
@@ -248,11 +321,8 @@ class RemittanceService {
     });
   }
 
-  // ==================== REMITTANCE HISTORY ====================
+  // ==================== HISTORY & STATS ====================
 
-  /**
-   * Get user's remittance history with enhanced details
-   */
   async getHistory(userId, options = {}) {
     const limit = options.limit || 50;
     const country = options.country;
@@ -260,9 +330,8 @@ class RemittanceService {
 
     let remittances = await this.crossBorder.getRemittanceHistory(userId, limit);
 
-    // Apply filters
     if (country) {
-      remittances = remittances.filter(r => r.recipientCountryCode === country);
+      remittances = remittances.filter(r => r.recipientCountry === country);
     }
 
     if (status) {
@@ -273,7 +342,7 @@ class RemittanceService {
     const enhanced = await Promise.all(
       remittances.map(async (remittance) => {
         try {
-          const recipient = await this.crossBorder.getRecipient(remittance.recipientId);
+          const recipient = await this.crossBorder.getRecipientById(remittance.recipientId);
           return {
             ...remittance,
             recipientDetails: recipient
@@ -287,81 +356,106 @@ class RemittanceService {
     return enhanced;
   }
 
-  // ==================== STATISTICS ====================
-
-  /**
-   * Get comprehensive remittance statistics
-   */
   async getStats(userId, period = 'month') {
-    const stats = await this.crossBorder.getRemittanceStats(userId, period);
+    const stats = await this.crossBorder.getUserRemittanceStats(userId);
     
-    // Add additional insights
-    const insights = {
-      mostFrequentCountry: null,
-      averageFee: 0,
-      totalSaved: 0 // vs traditional services
-    };
-
-    if (stats.byCountry) {
-      const countries = Object.entries(stats.byCountry);
-      if (countries.length > 0) {
-        const [country, data] = countries.reduce((max, current) => 
-          current[1].count > max[1].count ? current : max
-        );
-        insights.mostFrequentCountry = country;
-      }
-    }
-
-    insights.averageFee = stats.totalFees / (stats.totalTransactions || 1);
-    
-    // Calculate savings vs 5% traditional fee
-    insights.totalSaved = (stats.totalVolume * 0.05) - stats.totalFees;
+    // Add blockchain insights
+    const poolStats = await this.qubicPayments.getPoolStats();
 
     return {
       ...stats,
-      insights
+      blockchain: {
+        poolLiquidity: poolStats.success ? poolStats.reserves : 'N/A',
+        totalPoolVolume: poolStats.success ? poolStats.volume : 'N/A',
+        totalTransfers: poolStats.success ? poolStats.transfers : 'N/A'
+      }
     };
+  }
+
+  // ==================== TRACK DELIVERY ====================
+
+  async trackDelivery(remittanceId) {
+    try {
+      const remittance = await this.crossBorder.getRemittanceById(remittanceId);
+
+      // Check blockchain confirmation if txHash exists
+      let blockchainStatus = null;
+      if (remittance.txHash) {
+        const receipt = await this.qubicPayments.getTransactionReceipt(remittance.txHash);
+        blockchainStatus = receipt.success ? receipt.receipt : null;
+      }
+
+      return {
+        success: true,
+        tracking: {
+          remittanceId,
+          status: remittance.status,
+          recipient: remittance.recipientName,
+          country: remittance.recipientCountry,
+          amount: remittance.receiveAmount,
+          currency: remittance.recipientCurrency,
+          estimatedDelivery: remittance.estimatedDeliveryTime,
+          txHash: remittance.txHash,
+          explorerUrl: remittance.explorerUrl,
+          decisionTxHash: remittance.decisionTxHash,
+          blockchainStatus,
+          createdAt: remittance.createdAt,
+          completedAt: remittance.completedAt
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  // ==================== EXCHANGE RATES ====================
+
+  async getExchangeRate(fromCurrency, toCurrency) {
+    try {
+      const rate = await this.exchangeRates.getRate(fromCurrency, toCurrency);
+
+      return {
+        success: true,
+        from: fromCurrency,
+        to: toCurrency,
+        rate,
+        formatted: `1 ${fromCurrency} = ${rate.toFixed(2)} ${toCurrency}`,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  async getAllRates() {
+    const rates = await this.exchangeRates.getAllRates();
+    return rates;
   }
 
   // ==================== RECIPIENT SUGGESTIONS ====================
 
-  /**
-   * Get suggested recipients based on history
-   */
   async getSuggestedRecipients(userId, limit = 5) {
     const recipients = await this.crossBorder.getRecipients(userId);
     
-    // Sort by frequency and recency
     const sorted = recipients
-      .filter(r => r.useCount > 0)
-      .sort((a, b) => {
-        // Weight: 70% frequency, 30% recency
-        const aScore = (a.useCount * 0.7) + (a.lastUsed ? 0.3 : 0);
-        const bScore = (b.useCount * 0.7) + (b.lastUsed ? 0.3 : 0);
-        return bScore - aScore;
-      })
+      .filter(r => r.transactionCount > 0)
+      .sort((a, b) => b.transactionCount - a.transactionCount)
       .slice(0, limit);
 
     return sorted;
   }
 
-  // ==================== TRACK DELIVERY ====================
-
-  /**
-   * Track remittance delivery status
-   */
-  async trackDelivery(remittanceId) {
-    return await this.crossBorder.trackDelivery(remittanceId);
-  }
-
   // ==================== CANCEL REMITTANCE ====================
 
-  /**
-   * Cancel pending remittance (before execution)
-   */
   async cancelRemittance(remittanceId) {
     try {
-      const remittance = await this.crossBorder.getRemittance(remittanceId);
+      const remittance = await this.crossBorder.getRemittanceById(remittanceId);
       
       if (remittance.status !== 'pending') {
         throw new Error('Can only cancel pending remittances');
@@ -374,6 +468,15 @@ class RemittanceService {
           cancelledAt: new Date().toISOString()
         }
       );
+
+      // Update decision status
+      if (remittance.decisionTxHash) {
+        await this.qubicPayments.updateDecisionStatus(
+          remittanceId,
+          'cancelled',
+          ''
+        );
+      }
 
       console.log(`[REMITTANCE] ❌ Remittance cancelled: ${remittanceId}`);
       
@@ -388,58 +491,14 @@ class RemittanceService {
       };
     }
   }
-
-  // ==================== EXCHANGE RATE QUERIES ====================
-
-  /**
-   * Get current exchange rate for a currency pair
-   */
-  async getExchangeRate(fromCurrency, toCurrency) {
-    try {
-      const rate = await this.exchangeRates.getRate(fromCurrency, toCurrency);
-      const currencyInfo = this.exchangeRates.getCurrencyInfo(toCurrency);
-
-      return {
-        success: true,
-        from: fromCurrency,
-        to: toCurrency,
-        rate,
-        formatted: `1 ${fromCurrency} = ${rate.toFixed(2)} ${toCurrency}`,
-        symbol: currencyInfo?.symbol,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * Get all available exchange rates
-   */
-  async getAllRates() {
-    const currencies = this.exchangeRates.getSupportedCurrencies()
-      .filter(c => c.code !== 'USDC' && c.code !== 'USD')
-      .map(c => c.code);
-
-    const rates = await this.exchangeRates.getRatesForMultipleCurrencies(currencies);
-
-    return Object.entries(rates).map(([currency, rate]) => ({
-      currency,
-      rate,
-      info: this.exchangeRates.getCurrencyInfo(currency)
-    }));
-  }
 }
 
 // Singleton instance
 let remittanceServiceInstance = null;
 
-function getRemittanceService(thirdwebPayments, firebaseService) {
+function getRemittanceService() {
   if (!remittanceServiceInstance) {
-    remittanceServiceInstance = new RemittanceService(thirdwebPayments, firebaseService);
+    remittanceServiceInstance = new RemittanceService();
   }
   return remittanceServiceInstance;
 }

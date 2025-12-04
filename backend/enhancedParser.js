@@ -1,4 +1,4 @@
-// Enhanced Parser with Scheduling Support
+// Enhanced Parser with Scheduling Support for QubicPay AI
 const chrono = require('chrono-node');
 
 /**
@@ -76,6 +76,7 @@ function parseInstructionWithScheduling(text) {
         payee,
         amount,
         currency: 'USDC',
+        blockchain: 'qubic', // Added for Qubic integration
         recurring
       });
       break;
@@ -97,6 +98,7 @@ function parseInstructionWithScheduling(text) {
         payee,
         amount,
         currency: 'USDC',
+        blockchain: 'qubic',
         recurring
       });
     }
@@ -116,6 +118,7 @@ function parseInstructionWithScheduling(text) {
     recurring,
     naturalLanguageSummary,
     confidence,
+    blockchain: 'qubic', // Added for Qubic integration
     timestamp: new Date().toISOString()
   };
 }
@@ -132,14 +135,14 @@ function generateSummary(intents, scheduledDate, recurring) {
   let summary = ``;
   
   if (recurring.enabled) {
-    summary = `Set up ${recurring.frequency} payment of ${intent.amount} ${intent.currency} to ${intent.payee}`;
+    summary = `Set up ${recurring.frequency} payment of ${intent.amount} ${intent.currency} to ${intent.payee} via Qubic`;
     if (scheduledDate) {
       summary += `, starting ${formatDateForDisplay(scheduledDate)}`;
     }
   } else if (scheduledDate) {
-    summary = `Schedule payment of ${intent.amount} ${intent.currency} to ${intent.payee} on ${formatDateForDisplay(scheduledDate)}`;
+    summary = `Schedule payment of ${intent.amount} ${intent.currency} to ${intent.payee} on ${formatDateForDisplay(scheduledDate)} via Qubic`;
   } else {
-    summary = `Send ${intent.amount} ${intent.currency} to ${intent.payee} now`;
+    summary = `Send ${intent.amount} ${intent.currency} to ${intent.payee} now via Qubic`;
   }
   
   return summary;
@@ -232,9 +235,34 @@ function parseSimpleDate(text) {
   return null;
 }
 
+/**
+ * Validate Qubic address format
+ */
+function isValidQubicAddress(address) {
+  // Qubic uses Ethereum-style addresses
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
+
+/**
+ * Extract Qubic-specific metadata from instruction
+ */
+function extractQubicMetadata(parsedInstruction) {
+  return {
+    blockchain: 'qubic',
+    requiresDecisionLog: true,
+    requiresIPFS: true,
+    estimatedGas: 'auto',
+    explorerUrl: process.env.QUBIC_EXPLORER || 'https://testnet-explorer.qubic.xyz',
+    ...parsedInstruction
+  };
+}
+
 module.exports = {
   parseInstructionWithScheduling,
   formatDateForDisplay,
   generateSummary,
-  calculateConfidence
+  calculateConfidence,
+  parseSimpleDate,
+  isValidQubicAddress,
+  extractQubicMetadata
 };

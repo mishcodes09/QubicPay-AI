@@ -1,4 +1,4 @@
-// crossBorderService.js - Cross-Border Remittance Service for ArcBot
+// crossBorderService.js - Cross-Border Remittance Service for QubicPay AI
 const admin = require('firebase-admin');
 
 class CrossBorderService {
@@ -16,50 +16,56 @@ class CrossBorderService {
       'KE': {
         name: 'Kenya',
         currency: 'KES',
-        methods: ['mobile_money', 'bank_transfer'],
-        providers: ['M-Pesa', 'Airtel Money'],
+        methods: ['mobile_money', 'bank_transfer', 'wallet'],
+        providers: ['M-Pesa', 'Airtel Money', 'Qubic Wallet'],
         deliveryTime: '5-15 minutes',
-        limits: { min: 1, max: 10000 }
+        limits: { min: 1, max: 10000 },
+        blockchain: 'qubic'
       },
       'NG': {
         name: 'Nigeria',
         currency: 'NGN',
-        methods: ['bank_transfer', 'mobile_money'],
-        providers: ['Bank Transfer', 'Opay'],
+        methods: ['bank_transfer', 'mobile_money', 'wallet'],
+        providers: ['Bank Transfer', 'Opay', 'Qubic Wallet'],
         deliveryTime: '10-30 minutes',
-        limits: { min: 1, max: 5000 }
+        limits: { min: 1, max: 5000 },
+        blockchain: 'qubic'
       },
       'ZA': {
         name: 'South Africa',
         currency: 'ZAR',
         methods: ['bank_transfer', 'wallet'],
-        providers: ['Bank Transfer', 'Luno'],
+        providers: ['Bank Transfer', 'Luno', 'Qubic Wallet'],
         deliveryTime: '15-45 minutes',
-        limits: { min: 1, max: 5000 }
+        limits: { min: 1, max: 5000 },
+        blockchain: 'qubic'
       },
       'GH': {
         name: 'Ghana',
         currency: 'GHS',
-        methods: ['mobile_money', 'bank_transfer'],
-        providers: ['MTN Mobile Money', 'Vodafone Cash'],
+        methods: ['mobile_money', 'bank_transfer', 'wallet'],
+        providers: ['MTN Mobile Money', 'Vodafone Cash', 'Qubic Wallet'],
         deliveryTime: '10-20 minutes',
-        limits: { min: 1, max: 5000 }
+        limits: { min: 1, max: 5000 },
+        blockchain: 'qubic'
       },
       'UG': {
         name: 'Uganda',
         currency: 'UGX',
-        methods: ['mobile_money', 'bank_transfer'],
-        providers: ['MTN Mobile Money', 'Airtel Money'],
+        methods: ['mobile_money', 'bank_transfer', 'wallet'],
+        providers: ['MTN Mobile Money', 'Airtel Money', 'Qubic Wallet'],
         deliveryTime: '10-20 minutes',
-        limits: { min: 1, max: 5000 }
+        limits: { min: 1, max: 5000 },
+        blockchain: 'qubic'
       },
       'RW': {
         name: 'Rwanda',
         currency: 'RWF',
-        methods: ['mobile_money', 'bank_transfer'],
-        providers: ['MTN Mobile Money', 'Airtel Money'],
+        methods: ['mobile_money', 'bank_transfer', 'wallet'],
+        providers: ['MTN Mobile Money', 'Airtel Money', 'Qubic Wallet'],
         deliveryTime: '10-20 minutes',
-        limits: { min: 1, max: 5000 }
+        limits: { min: 1, max: 5000 },
+        blockchain: 'qubic'
       }
     };
   }
@@ -88,11 +94,17 @@ class CrossBorderService {
         phoneNumber: recipientData.phoneNumber || null,
         bankAccount: recipientData.bankAccount || null,
         bankName: recipientData.bankName || null,
-        preferredMethod: recipientData.preferredMethod || 'mobile_money',
-        relationship: recipientData.relationship || 'other', // family, friend, business, other
+        preferredMethod: recipientData.preferredMethod || 'wallet',
+        relationship: recipientData.relationship || 'other',
         favorite: recipientData.favorite || false,
         nickname: recipientData.nickname || recipientData.name,
         verified: false,
+        
+        // Qubic-specific
+        blockchain: 'qubic',
+        qubicAddress: recipientData.walletAddress,
+        onChainVerified: false,
+        
         totalReceived: 0,
         transactionCount: 0,
         lastTransaction: null,
@@ -220,10 +232,17 @@ class CrossBorderService {
         estimatedDeliveryTime: remittanceData.estimatedDeliveryTime,
         actualDeliveryTime: null,
         
-        // Transaction
+        // Qubic Blockchain
+        blockchain: 'qubic',
+        decisionTxHash: remittanceData.decisionTxHash || null,
+        decisionExplorerUrl: remittanceData.decisionExplorerUrl || null,
         txHash: remittanceData.txHash || null,
         explorerUrl: remittanceData.explorerUrl || null,
-        status: remittanceData.status || 'pending', // pending, processing, completed, failed
+        blockNumber: remittanceData.blockNumber || null,
+        gasUsed: remittanceData.gasUsed || null,
+        rationaleCID: remittanceData.rationaleCID || null,
+        
+        status: remittanceData.status || 'pending',
         failureReason: null,
         
         // Metadata
@@ -333,6 +352,10 @@ class CrossBorderService {
           completed: 0,
           pending: 0,
           failed: 0
+        },
+        blockchain: {
+          qubicTransactions: remittances.filter(r => r.blockchain === 'qubic').length,
+          onChainDecisions: remittances.filter(r => r.decisionTxHash).length
         }
       };
 
@@ -425,6 +448,24 @@ class CrossBorderService {
     } catch (error) {
       console.error('❌ Error fetching frequent recipients:', error.message);
       return [];
+    }
+  }
+
+  // ==================== QUBIC-SPECIFIC ====================
+
+  async verifyRecipientOnChain(recipientId, qubicAddress) {
+    try {
+      await this.updateRecipient(recipientId, {
+        qubicAddress,
+        onChainVerified: true,
+        verifiedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      console.log(`✅ Recipient verified on-chain: ${recipientId}`);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error verifying recipient:', error.message);
+      throw error;
     }
   }
 }

@@ -1,24 +1,36 @@
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
-const { logDecisionOnChain, updateDecisionStatus } = require('./decisionLogger');
+const { logDecisionOnChain, updateDecisionStatus } = require('./services/decisionLogger');
 
 class PaymentOrchestrator {
   constructor() {
-    this.circleApiKey = process.env.CIRCLE_API_KEY;
-    this.circleBaseUrl = process.env.CIRCLE_BASE_URL || 'https://api-sandbox.circle.com';
-    this.mockMode = !this.circleApiKey;
+    this.qubicPayments = null;
+    this.initialized = false;
     
-    if (this.mockMode) {
-      console.log('[ORCHESTRATOR] 🔧 Running in MOCK mode (no Circle API key)');
-    } else {
-      console.log('[ORCHESTRATOR] 💳 Connected to Circle API');
+    console.log('[ORCHESTRATOR] 🔗 Using Qubic blockchain');
+  }
+
+  async initialize() {
+    if (this.initialized) return;
+    
+    try {
+      const { getQubicPaymentService } = require('./services/qubicPayments');
+      this.qubicPayments = getQubicPaymentService();
+      await this.qubicPayments.initialize();
+      
+      this.initialized = true;
+      console.log('[ORCHESTRATOR] ✅ Qubic payment service connected');
+    } catch (error) {
+      console.error('[ORCHESTRATOR] Failed to initialize Qubic:', error.message);
     }
   }
   
   async executePlan(plan, context) {
+    await this.initialize();
+    
     const { userId, agent, wallet, instructionId } = context;
     
-    console.log(`[ORCHESTRATOR] 🚀 Executing plan for user ${userId}`);
+    console.log(`[ORCHESTRATOR] 🚀 Executing plan for user ${userId} via Qubic`);
     console.log(`[ORCHESTRATOR] Actions: ${plan.actions.length}`);
     
     const results = [];
@@ -32,7 +44,7 @@ class PaymentOrchestrator {
     
     const riskScore = this.calculateRiskScore(totalAmount, wallet, agent);
     
-    // Log decision to blockchain BEFORE execution
+    // Log decision to Qubic blockchain BEFORE execution
     let blockchainTx = null;
     if (instructionId) {
       try {
@@ -44,29 +56,28 @@ class PaymentOrchestrator {
           instructionId,
           actionSummary,
           '', // rationaleCID - could upload to IPFS
-          '', // txRef - will update after Circle execution
           totalAmount,
           riskScore
         );
         
         if (blockchainTx.success) {
-          console.log(`[ORCHESTRATOR] ✅ Decision logged on Arc: ${blockchainTx.explorerUrl}`);
+          console.log(`[ORCHESTRATOR] ✅ Decision logged on Qubic: ${blockchainTx.explorerUrl}`);
         }
       } catch (error) {
-        console.warn('[ORCHESTRATOR] ⚠️  Blockchain logging failed:', error.message);
+        console.warn('[ORCHESTRATOR] ⚠️ Blockchain logging failed:', error.message);
       }
     }
     
-    // Execute each action
+    // Execute each action via Qubic
     for (const action of plan.actions) {
       try {
         this.checkPolicy(action, agent, wallet);
         
         let result;
-        if (action.type === 'TRANSFER') {
-          result = await this.executeTransfer(action, wallet);
+        if (action.type === 'TRANSFER' || action.type === 'payment') {
+          result = await this.executeTransfer(action, wallet, instructionId);
         } else if (action.type === 'SAVE') {
-          result = await this.executeSave(action, wallet);
+          result = await this.executeSave(action, wallet, instructionId);
         } else {
           throw new Error(`Unknown action type: ${action.type}`);
         }
@@ -74,7 +85,8 @@ class PaymentOrchestrator {
         results.push({
           actionId: action.actionId,
           ...result,
-          status: 'confirmed'
+          status: 'confirmed',
+          blockchain: 'qubic'
         });
         
         console.log(`[ORCHESTRATOR] ✅ Action ${action.actionId} completed`);
@@ -86,28 +98,29 @@ class PaymentOrchestrator {
         results.push({
           actionId: action.actionId,
           status: 'failed',
-          error: error.message
+          error: error.message,
+          blockchain: 'qubic'
         });
       }
     }
     
-    // Update blockchain status after execution
+    // Update Qubic blockchain status after execution
     if (blockchainTx && blockchainTx.success && instructionId) {
       try {
-        const circleTxRefs = results
-          .filter(r => r.circleTxId)
-          .map(r => r.circleTxId)
+        const qubicTxRefs = results
+          .filter(r => r.txHash)
+          .map(r => r.txHash)
           .join(',');
         
         await updateDecisionStatus(
           instructionId,
-          allSuccess ? 'EXECUTED' : 'FAILED',
-          circleTxRefs
+          allSuccess ? 'executed' : 'failed',
+          qubicTxRefs
         );
         
-        console.log(`[ORCHESTRATOR] ✅ Blockchain status updated: ${allSuccess ? 'EXECUTED' : 'FAILED'}`);
+        console.log(`[ORCHESTRATOR] ✅ Qubic status updated: ${allSuccess ? 'EXECUTED' : 'FAILED'}`);
       } catch (error) {
-        console.warn('[ORCHESTRATOR] ⚠️  Status update failed:', error.message);
+        console.warn('[ORCHESTRATOR] ⚠️ Status update failed:', error.message);
       }
     }
     
@@ -115,7 +128,8 @@ class PaymentOrchestrator {
       results,
       executedAt: new Date().toISOString(),
       summary: this.generateSummary(results),
-      blockchainTx
+      blockchainTx,
+      blockchain: 'qubic'
     };
   }
   
@@ -145,100 +159,52 @@ class PaymentOrchestrator {
     return Math.min(risk, 1.0);
   }
   
-  async executeTransfer(action, wallet) {
-    if (this.mockMode) {
-      return this.mockCircleTransfer(action, wallet);
-    }
-    
+  async executeTransfer(action, wallet, decisionId) {
     try {
-      const response = await axios.post(
-        `${this.circleBaseUrl}/v1/transfers`,
-        {
-          idempotencyKey: uuidv4(),
-          source: { type: 'wallet', id: wallet.circleWalletId },
-          destination: {
-            type: 'blockchain',
-            address: this.resolveAddress(action.to),
-            chain: 'ETH'
-          },
-          amount: {
-            amount: action.amount.toString(),
-            currency: action.currency
-          },
-          metadata: {
-            memo: action.memo || `Payment to ${action.to}`
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.circleApiKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      if (!this.qubicPayments || !this.initialized) {
+        throw new Error('Qubic payment service not initialized');
+      }
       
-      return {
-        circleTxId: response.data.id,
-        arcTxHash: `0x${this.generateTxHash()}`,
+      console.log(`[ORCHESTRATOR] Executing transfer via Qubic`);
+      console.log(`   To: ${action.to}`);
+      console.log(`   Amount: ${action.amount} ${action.currency || 'USDC'}`);
+      
+      const result = await this.qubicPayments.instantTransfer({
+        recipient: action.to,
         amount: action.amount,
-        to: action.to
-      };
+        decisionId: decisionId || `action_${Date.now()}`
+      });
+      
+      if (result.success) {
+        return {
+          txHash: result.txHash,
+          explorerUrl: result.explorerUrl,
+          blockNumber: result.blockNumber,
+          gasUsed: result.gasUsed,
+          amount: action.amount,
+          to: action.to,
+          blockchain: 'qubic'
+        };
+      } else {
+        throw new Error(result.error || 'Transfer failed');
+      }
     } catch (error) {
-      console.error('[ORCHESTRATOR] Circle API error:', error.message);
+      console.error('[ORCHESTRATOR] Qubic transfer error:', error.message);
       throw new Error(`Transfer failed: ${error.message}`);
     }
   }
   
-  async executeSave(action, wallet) {
+  async executeSave(action, wallet, decisionId) {
     const saveAmount = wallet.balance * (action.percent / 100);
     
-    if (this.mockMode) {
-      return {
-        circleTxId: `circle_save_${uuidv4()}`,
-        arcTxHash: `0x${this.generateTxHash()}`,
-        amount: saveAmount,
-        to: 'Savings Account',
-        percent: action.percent
-      };
-    }
+    // For savings, we'd transfer to a designated savings wallet
+    const savingsAddress = process.env.SAVINGS_WALLET_ADDRESS || wallet.address;
     
     return await this.executeTransfer({
       ...action,
       amount: saveAmount,
-      to: 'Savings Wallet Address'
-    }, wallet);
-  }
-  
-  async mockCircleTransfer(action, wallet) {
-    await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 400));
-    
-    if (Math.random() < 0.05) {
-      throw new Error('Simulated network timeout');
-    }
-    
-    return {
-      circleTxId: `circle_${uuidv4()}`,
-      arcTxHash: `0x${this.generateTxHash()}`,
-      amount: action.amount,
-      to: action.to,
-      blockchainTxUrl: `https://testnet.arcscan.app/tx/0x${this.generateTxHash()}`
-    };
-  }
-  
-  resolveAddress(recipient) {
-    const mockAddresses = {
-      'Netflix': '0xNetflix123456789AbCdEf',
-      'Trainer': '0xTrainer123456789AbCdEf',
-      'Savings Account': '0xSavings123456789AbCdEf'
-    };
-    
-    return mockAddresses[recipient] || `0x${this.generateTxHash().slice(0, 40)}`;
-  }
-  
-  generateTxHash() {
-    return Array.from({ length: 64 }, () => 
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('');
+      to: savingsAddress
+    }, wallet, decisionId);
   }
   
   generateSummary(results) {
@@ -253,7 +219,8 @@ class PaymentOrchestrator {
       successful,
       failed,
       totalAmount,
-      message: `Executed ${successful}/${results.length} actions successfully${
+      blockchain: 'qubic',
+      message: `Executed ${successful}/${results.length} actions successfully via Qubic${
         totalAmount > 0 ? ` (${totalAmount.toFixed(2)} USDC)` : ''
       }`
     };

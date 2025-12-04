@@ -1,4 +1,4 @@
-// services/firebaseScheduler.js - Firebase-based Payment Scheduler
+// services/firebaseScheduler.js - Firebase-based Payment Scheduler for Qubic
 const admin = require('firebase-admin');
 const cron = require('node-cron');
 
@@ -6,7 +6,7 @@ class FirebasePaymentScheduler {
   constructor() {
     this.initialized = false;
     this.db = null;
-    this.thirdwebPayments = null;
+    this.qubicPayments = null;
     this.cronJobsStarted = false;
   }
 
@@ -32,18 +32,17 @@ class FirebasePaymentScheduler {
           credential: admin.credential.cert(serviceAccount)
         });
       } else {
-        // If already initialized, get the project ID from the app
         serviceAccount = { project_id: admin.app().options.projectId || 'arcbot-63f2a' };
       }
 
       this.db = admin.firestore();
       
-      // Initialize Thirdweb for payment execution
-      const { getThirdwebPaymentService } = require('../thirdwebPayments');
-      this.thirdwebPayments = getThirdwebPaymentService();
+      // Initialize Qubic Payment Service
+      const { getQubicPaymentService } = require('./qubicPayments');
+      this.qubicPayments = getQubicPaymentService();
       
       this.initialized = true;
-      console.log('✅ Firebase Payment Scheduler initialized');
+      console.log('✅ Firebase Payment Scheduler initialized with Qubic');
       console.log(`📦 Project: ${serviceAccount.project_id}`);
 
       // Start cron jobs
@@ -78,6 +77,12 @@ class FirebasePaymentScheduler {
       status: 'scheduled',
       description: paymentData.description || '',
       tags: paymentData.tags || [],
+      
+      // Qubic-specific
+      blockchain: 'qubic',
+      decisionId: null,
+      decisionTxHash: null,
+      
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       executedAt: null,
       txHash: null,
@@ -134,31 +139,56 @@ class FirebasePaymentScheduler {
     const payment = paymentDoc.data();
     
     try {
-      console.log(`💸 Executing scheduled payment: ${paymentId}`);
+      console.log(`💸 Executing scheduled payment via Qubic: ${paymentId}`);
       console.log(`   To: ${payment.payee}`);
       console.log(`   Amount: ${payment.amount} ${payment.currency}`);
       
-      // Create payment request via Thirdweb
-      const paymentRequest = await this.thirdwebPayments.createPaymentRequest({
-        to: payment.payee,
+      // Step 1: Log decision on Qubic
+      const decisionId = `scheduled_${paymentId}`;
+      const decisionResult = await this.qubicPayments.logDecision({
+        decisionId,
+        actionSummary: `Scheduled payment: ${payment.amount} USDC to ${payment.payee}`,
+        rationaleCID: '',
         amount: payment.amount,
-        currency: payment.currency,
-        description: payment.description || `Scheduled payment to ${payment.payee}`
+        riskScore: 5 // Low risk for scheduled payments
+      });
+
+      if (!decisionResult.success) {
+        throw new Error(`Decision logging failed: ${decisionResult.error}`);
+      }
+
+      console.log('[QUBIC] Decision logged:', decisionResult.txHash);
+
+      // Update with decision TX
+      await paymentRef.update({
+        decisionId,
+        decisionTxHash: decisionResult.txHash
+      });
+
+      // Step 2: Execute payment via PaymentRouter
+      const transferResult = await this.qubicPayments.instantTransfer({
+        recipient: payment.payee,
+        amount: payment.amount,
+        decisionId
       });
       
-      // Execute payment
-      const result = await this.thirdwebPayments.executePayment(paymentRequest);
-      
-      if (result.status === 'completed') {
+      if (transferResult.success) {
+        console.log('[QUBIC] Payment executed:', transferResult.txHash);
+
+        // Update decision status
+        await this.qubicPayments.updateDecisionStatus(decisionId, 'executed', transferResult.txHash);
+
         // Update payment status
         await paymentRef.update({
           status: 'completed',
           executedAt: admin.firestore.FieldValue.serverTimestamp(),
-          txHash: result.txHash,
-          explorerUrl: result.explorerUrl
+          txHash: transferResult.txHash,
+          explorerUrl: transferResult.explorerUrl,
+          blockNumber: transferResult.blockNumber,
+          gasUsed: transferResult.gasUsed
         });
         
-        console.log(`✅ Payment executed: ${result.txHash}`);
+        console.log(`✅ Payment executed: ${transferResult.txHash}`);
         
         // Log to payment history
         await this.logPaymentHistory(payment.userId, {
@@ -168,8 +198,10 @@ class FirebasePaymentScheduler {
           amount: payment.amount,
           currency: payment.currency,
           status: 'completed',
-          txHash: result.txHash,
-          explorerUrl: result.explorerUrl
+          txHash: transferResult.txHash,
+          explorerUrl: transferResult.explorerUrl,
+          decisionTxHash: decisionResult.txHash,
+          blockchain: 'qubic'
         });
         
         // Handle recurring payments
@@ -177,9 +209,14 @@ class FirebasePaymentScheduler {
           await this.scheduleRecurringPayment(payment);
         }
         
-        return { success: true, txHash: result.txHash, explorerUrl: result.explorerUrl };
+        return { 
+          success: true, 
+          txHash: transferResult.txHash, 
+          explorerUrl: transferResult.explorerUrl,
+          decisionTxHash: decisionResult.txHash
+        };
       } else {
-        throw new Error(result.error || 'Payment execution failed');
+        throw new Error(transferResult.error || 'Payment execution failed');
       }
     } catch (error) {
       console.error(`❌ Payment execution failed: ${error.message}`);
@@ -188,6 +225,11 @@ class FirebasePaymentScheduler {
         status: 'failed',
         failureReason: error.message
       });
+      
+      // Update decision status if it was created
+      if (payment.decisionId) {
+        await this.qubicPayments.updateDecisionStatus(payment.decisionId, 'failed', '');
+      }
       
       return { success: false, error: error.message };
     }
@@ -288,6 +330,7 @@ class FirebasePaymentScheduler {
       currency: transferData.currency || 'USDC',
       category: transferData.category || 'other',
       favorite: transferData.favorite || false,
+      blockchain: 'qubic',
       lastUsed: null,
       useCount: 0,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -333,6 +376,7 @@ class FirebasePaymentScheduler {
       historyId,
       userId,
       ...paymentData,
+      blockchain: 'qubic',
       timestamp: admin.firestore.FieldValue.serverTimestamp()
     };
 
@@ -373,7 +417,7 @@ class FirebasePaymentScheduler {
       }
     });
 
-    console.log('✅ Cron jobs initialized');
+    console.log('✅ Cron jobs initialized (Qubic)');
     console.log('   - Payment execution: Every minute');
     console.log('   - Daily reminders: 9:00 AM');
   }
@@ -465,7 +509,8 @@ class FirebasePaymentScheduler {
         payee: data.payee,
         amount: data.amount,
         currency: data.currency,
-        status: data.status
+        status: data.status,
+        blockchain: data.blockchain
       };
     });
     
@@ -485,7 +530,8 @@ class FirebasePaymentScheduler {
     return {
       upcomingPayments,
       recentPayments,
-      frequentPayees
+      frequentPayees,
+      blockchain: 'qubic'
     };
   }
 }

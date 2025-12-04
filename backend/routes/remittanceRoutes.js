@@ -1,26 +1,26 @@
-// ==================== REMITTANCE ROUTES ====================
-// Add these routes to your server.js file
+// routes/remittanceRoutes.js - Qubic Blockchain Integration
+// Cross-border remittance routes with Qubic on-chain logging
 
-// Initialize Remittance Service (add to top of server.js)
-const { getRemittanceService } = require('./services/remittanceService');
-const { getCrossBorderService } = require('./services/crossBorderService');
-const { getExchangeRateService } = require('./services/exchangeRateService');
+const express = require('express');
+const router = express.Router();
 
-// Initialize services after Firebase initialization
+// These services will be initialized in server.js and passed to routes
 let remittanceService = null;
 let crossBorderService = null;
 let exchangeRateService = null;
 
-(async () => {
-  // ... existing initialization code ...
-  
-  // Initialize cross-border services
-  exchangeRateService = getExchangeRateService();
-  crossBorderService = getCrossBorderService(paymentScheduler);
-  remittanceService = getRemittanceService(thirdwebPayments, paymentScheduler);
-  
-  console.log('[REMITTANCE] ✅ Cross-border services initialized');
-})();
+// Middleware to ensure services are initialized
+const ensureServicesInitialized = (req, res, next) => {
+  if (!remittanceService || !crossBorderService || !exchangeRateService) {
+    return res.status(503).json({
+      success: false,
+      error: 'Remittance services are still initializing. Please try again.'
+    });
+  }
+  next();
+};
+
+router.use(ensureServicesInitialized);
 
 // ==================== RECIPIENT MANAGEMENT ROUTES ====================
 
@@ -28,20 +28,27 @@ let exchangeRateService = null;
  * Add a new recipient
  * POST /api/remittance/recipients
  */
-app.post('/api/remittance/recipients', async (req, res) => {
+router.post('/recipients', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const recipientData = req.body;
+    
+    console.log(`[REMITTANCE] Adding recipient for user ${userId}`);
     
     const recipient = await crossBorderService.addRecipient(userId, recipientData);
     
     res.json({
       success: true,
-      recipient
+      recipient,
+      blockchain: 'qubic',
+      message: `Recipient ${recipient.name} added successfully`
     });
   } catch (error) {
     console.error('[API] Add recipient error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -49,11 +56,11 @@ app.post('/api/remittance/recipients', async (req, res) => {
  * Get all recipients
  * GET /api/remittance/recipients
  */
-app.get('/api/remittance/recipients', async (req, res) => {
+router.get('/recipients', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const filter = {
-      country: req.query.country,
+      countryCode: req.query.country,
       favorite: req.query.favorite === 'true'
     };
     
@@ -62,11 +69,15 @@ app.get('/api/remittance/recipients', async (req, res) => {
     res.json({
       success: true,
       recipients,
-      count: recipients.length
+      count: recipients.length,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Get recipients error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -74,18 +85,47 @@ app.get('/api/remittance/recipients', async (req, res) => {
  * Get a specific recipient
  * GET /api/remittance/recipients/:recipientId
  */
-app.get('/api/remittance/recipients/:recipientId', async (req, res) => {
+router.get('/recipients/:recipientId', async (req, res) => {
   try {
     const { recipientId } = req.params;
-    const recipient = await crossBorderService.getRecipient(recipientId);
+    const recipient = await crossBorderService.getRecipientById(recipientId);
     
     res.json({
       success: true,
-      recipient
+      recipient,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Get recipient error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * Update recipient
+ * PUT /api/remittance/recipients/:recipientId
+ */
+router.put('/recipients/:recipientId', async (req, res) => {
+  try {
+    const { recipientId } = req.params;
+    const updates = req.body;
+    
+    await crossBorderService.updateRecipient(recipientId, updates);
+    
+    res.json({
+      success: true,
+      message: 'Recipient updated successfully',
+      blockchain: 'qubic'
+    });
+  } catch (error) {
+    console.error('[API] Update recipient error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -93,18 +133,22 @@ app.get('/api/remittance/recipients/:recipientId', async (req, res) => {
  * Toggle recipient favorite
  * POST /api/remittance/recipients/:recipientId/favorite
  */
-app.post('/api/remittance/recipients/:recipientId/favorite', async (req, res) => {
+router.post('/recipients/:recipientId/favorite', async (req, res) => {
   try {
     const { recipientId } = req.params;
-    const isFavorite = await crossBorderService.toggleFavorite(recipientId);
+    const result = await crossBorderService.toggleFavorite(recipientId);
     
     res.json({
       success: true,
-      favorite: isFavorite
+      favorite: result.favorite,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Toggle favorite error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -112,18 +156,22 @@ app.post('/api/remittance/recipients/:recipientId/favorite', async (req, res) =>
  * Delete recipient
  * DELETE /api/remittance/recipients/:recipientId
  */
-app.delete('/api/remittance/recipients/:recipientId', async (req, res) => {
+router.delete('/recipients/:recipientId', async (req, res) => {
   try {
     const { recipientId } = req.params;
     await crossBorderService.deleteRecipient(recipientId);
     
     res.json({
       success: true,
-      message: 'Recipient deleted successfully'
+      message: 'Recipient deleted successfully',
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Delete recipient error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -131,22 +179,31 @@ app.delete('/api/remittance/recipients/:recipientId', async (req, res) => {
 
 /**
  * Get current exchange rate
- * GET /api/remittance/rates?from=USDC&to=KES
+ * GET /api/remittance/rates?from=USD&to=KES
  */
-app.get('/api/remittance/rates', async (req, res) => {
+router.get('/rates', async (req, res) => {
   try {
-    const { from = 'USDC', to } = req.query;
+    const { from = 'USD', to } = req.query;
     
     if (!to) {
-      return res.status(400).json({ error: 'Target currency required' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Target currency required' 
+      });
     }
     
     const rateInfo = await remittanceService.getExchangeRate(from, to);
     
-    res.json(rateInfo);
+    res.json({
+      ...rateInfo,
+      blockchain: 'qubic'
+    });
   } catch (error) {
     console.error('[API] Get rate error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -154,36 +211,45 @@ app.get('/api/remittance/rates', async (req, res) => {
  * Get all available rates
  * GET /api/remittance/rates/all
  */
-app.get('/api/remittance/rates/all', async (req, res) => {
+router.get('/rates/all', async (req, res) => {
   try {
     const rates = await remittanceService.getAllRates();
     
     res.json({
       success: true,
       rates,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Get all rates error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
 /**
- * Get supported currencies
- * GET /api/remittance/currencies
+ * Get supported countries
+ * GET /api/remittance/countries
  */
-app.get('/api/remittance/currencies', async (req, res) => {
+router.get('/countries', async (req, res) => {
   try {
-    const currencies = exchangeRateService.getSupportedCurrencies();
+    const countries = crossBorderService.getSupportedCountries();
     
     res.json({
       success: true,
-      currencies
+      countries,
+      count: countries.length,
+      blockchain: 'qubic'
     });
   } catch (error) {
-    console.error('[API] Get currencies error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Get countries error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -193,16 +259,19 @@ app.get('/api/remittance/currencies', async (req, res) => {
  * Preview remittance (calculate fees, rates, etc.)
  * POST /api/remittance/preview
  */
-app.post('/api/remittance/preview', async (req, res) => {
+router.post('/preview', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const { recipientId, amount } = req.body;
     
     if (!recipientId || !amount) {
       return res.status(400).json({ 
+        success: false,
         error: 'recipientId and amount are required' 
       });
     }
+    
+    console.log(`[REMITTANCE] Preview: ${amount} USDC to ${recipientId}`);
     
     const preview = await remittanceService.previewRemittance(
       userId,
@@ -210,46 +279,12 @@ app.post('/api/remittance/preview', async (req, res) => {
       parseFloat(amount)
     );
     
-    res.json(preview);
+    res.json({
+      ...preview,
+      blockchain: 'qubic'
+    });
   } catch (error) {
     console.error('[API] Preview remittance error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * Send remittance
- * POST /api/remittance/send
- */
-app.post('/api/remittance/send', async (req, res) => {
-  try {
-    const userId = req.headers['x-user-id'] || 'demo-user';
-    const { recipientId, amount, description } = req.body;
-    
-    if (!recipientId || !amount) {
-      return res.status(400).json({ 
-        error: 'recipientId and amount are required' 
-      });
-    }
-    
-    console.log(`[API] Sending remittance: ${amount} USDC to ${recipientId}`);
-    
-    const result = await remittanceService.sendRemittance(userId, {
-      recipientId,
-      amount: parseFloat(amount),
-      description: description || 'Cross-border remittance'
-    });
-    
-    if (result.success) {
-      // Refresh wallet balance
-      await getFreshWalletData(true);
-      
-      res.json(result);
-    } else {
-      res.status(400).json(result);
-    }
-  } catch (error) {
-    console.error('[API] Send remittance error:', error);
     res.status(500).json({ 
       success: false,
       error: error.message 
@@ -258,13 +293,70 @@ app.post('/api/remittance/send', async (req, res) => {
 });
 
 /**
+ * Send remittance via Qubic
+ * POST /api/remittance/send
+ * 
+ * This will:
+ * 1. Log decision on DecisionLogger contract
+ * 2. Execute payment via PaymentRouter
+ * 3. Update decision status
+ * 4. Log to Firebase for history
+ */
+router.post('/send', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 'demo-user';
+    const { recipientId, amount, description } = req.body;
+    
+    if (!recipientId || !amount) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'recipientId and amount are required' 
+      });
+    }
+    
+    console.log(`[REMITTANCE] Sending ${amount} USDC to ${recipientId} via Qubic`);
+    
+    const result = await remittanceService.sendRemittance(userId, {
+      recipientId,
+      amount: parseFloat(amount),
+      description: description || 'Cross-border remittance via Qubic'
+    });
+    
+    if (result.success) {
+      console.log(`[REMITTANCE] ✅ Sent successfully`);
+      console.log(`[REMITTANCE] Decision TX: ${result.blockchain?.decisionTx?.hash}`);
+      console.log(`[REMITTANCE] Payment TX: ${result.blockchain?.paymentTx?.hash}`);
+      
+      res.json({
+        ...result,
+        blockchain: 'qubic'
+      });
+    } else {
+      res.status(400).json({
+        ...result,
+        blockchain: 'qubic'
+      });
+    }
+  } catch (error) {
+    console.error('[API] Send remittance error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message,
+      blockchain: 'qubic'
+    });
+  }
+});
+
+/**
  * Quick send to saved recipient
  * POST /api/remittance/quick-send
  */
-app.post('/api/remittance/quick-send', async (req, res) => {
+router.post('/quick-send', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const { recipientId, amount } = req.body;
+    
+    console.log(`[REMITTANCE] Quick send: ${amount} USDC to ${recipientId}`);
     
     const result = await remittanceService.quickSend(
       userId,
@@ -272,10 +364,17 @@ app.post('/api/remittance/quick-send', async (req, res) => {
       parseFloat(amount)
     );
     
-    res.json(result);
+    res.json({
+      ...result,
+      blockchain: 'qubic'
+    });
   } catch (error) {
     console.error('[API] Quick send error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message,
+      blockchain: 'qubic'
+    });
   }
 });
 
@@ -283,7 +382,7 @@ app.post('/api/remittance/quick-send', async (req, res) => {
  * Get remittance history
  * GET /api/remittance/history
  */
-app.get('/api/remittance/history', async (req, res) => {
+router.get('/history', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const options = {
@@ -297,11 +396,15 @@ app.get('/api/remittance/history', async (req, res) => {
     res.json({
       success: true,
       history,
-      count: history.length
+      count: history.length,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Get history error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -309,18 +412,24 @@ app.get('/api/remittance/history', async (req, res) => {
  * Track delivery status
  * GET /api/remittance/track/:remittanceId
  */
-app.get('/api/remittance/track/:remittanceId', async (req, res) => {
+router.get('/track/:remittanceId', async (req, res) => {
   try {
     const { remittanceId } = req.params;
+    
+    console.log(`[REMITTANCE] Tracking: ${remittanceId}`);
+    
     const tracking = await remittanceService.trackDelivery(remittanceId);
     
     res.json({
-      success: true,
-      tracking
+      ...tracking,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Track delivery error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -328,7 +437,7 @@ app.get('/api/remittance/track/:remittanceId', async (req, res) => {
  * Get remittance statistics
  * GET /api/remittance/stats?period=month
  */
-app.get('/api/remittance/stats', async (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const period = req.query.period || 'month';
@@ -337,19 +446,23 @@ app.get('/api/remittance/stats', async (req, res) => {
     
     res.json({
       success: true,
-      stats
+      stats,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Get stats error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
 /**
- * Get suggested recipients
+ * Get suggested recipients (most frequent)
  * GET /api/remittance/suggestions
  */
-app.get('/api/remittance/suggestions', async (req, res) => {
+router.get('/suggestions', async (req, res) => {
   try {
     const userId = req.headers['x-user-id'] || 'demo-user';
     const limit = parseInt(req.query.limit) || 5;
@@ -358,11 +471,15 @@ app.get('/api/remittance/suggestions', async (req, res) => {
     
     res.json({
       success: true,
-      suggestions
+      suggestions,
+      blockchain: 'qubic'
     });
   } catch (error) {
     console.error('[API] Get suggestions error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
@@ -370,83 +487,115 @@ app.get('/api/remittance/suggestions', async (req, res) => {
  * Cancel remittance (before execution)
  * POST /api/remittance/:remittanceId/cancel
  */
-app.post('/api/remittance/:remittanceId/cancel', async (req, res) => {
+router.post('/:remittanceId/cancel', async (req, res) => {
   try {
     const { remittanceId } = req.params;
+    
+    console.log(`[REMITTANCE] Cancelling: ${remittanceId}`);
+    
     const result = await remittanceService.cancelRemittance(remittanceId);
     
-    res.json(result);
+    res.json({
+      ...result,
+      blockchain: 'qubic'
+    });
   } catch (error) {
     console.error('[API] Cancel remittance error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==================== PAYMENT CORRIDOR ROUTES ====================
-
-/**
- * Get available payment corridors
- * GET /api/remittance/corridors
- */
-app.get('/api/remittance/corridors', async (req, res) => {
-  try {
-    const corridors = crossBorderService.getAvailableCorridors();
-    
-    res.json({
-      success: true,
-      corridors
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
     });
-  } catch (error) {
-    console.error('[API] Get corridors error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ==================== KYC ROUTES ====================
-
-/**
- * Submit KYC data
- * POST /api/remittance/kyc
- */
-app.post('/api/remittance/kyc', async (req, res) => {
-  try {
-    const userId = req.headers['x-user-id'] || 'demo-user';
-    const kycData = req.body;
-    
-    const verification = await crossBorderService.saveKYCData(userId, kycData);
-    
-    res.json({
-      success: true,
-      verification,
-      message: 'KYC data submitted successfully. Verification pending.'
-    });
-  } catch (error) {
-    console.error('[API] Submit KYC error:', error);
-    res.status(500).json({ error: error.message });
   }
 });
 
 /**
- * Get KYC status
- * GET /api/remittance/kyc/status
+ * Get specific remittance details
+ * GET /api/remittance/:remittanceId
  */
-app.get('/api/remittance/kyc/status', async (req, res) => {
+router.get('/:remittanceId', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 'demo-user';
-    const status = await crossBorderService.getKYCStatus(userId);
+    const { remittanceId } = req.params;
+    
+    const remittance = await crossBorderService.getRemittanceById(remittanceId);
     
     res.json({
       success: true,
-      kyc: status
+      remittance,
+      blockchain: 'qubic'
     });
   } catch (error) {
-    console.error('[API] Get KYC status error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[API] Get remittance error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
-// Export for use in server.js
+// ==================== QUBIC-SPECIFIC ROUTES ====================
+
+/**
+ * Get Qubic pool stats for remittances
+ * GET /api/remittance/qubic/pool
+ */
+router.get('/qubic/pool', async (req, res) => {
+  try {
+    // This would integrate with your qubicPayments service
+    const qubicPayments = require('../services/qubicPayments').getQubicPaymentService();
+    const poolStats = await qubicPayments.getPoolStats();
+    
+    res.json({
+      success: true,
+      ...poolStats,
+      blockchain: 'qubic'
+    });
+  } catch (error) {
+    console.error('[API] Get pool stats error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * Get decision from Qubic blockchain
+ * GET /api/remittance/qubic/decision/:decisionId
+ */
+router.get('/qubic/decision/:decisionId', async (req, res) => {
+  try {
+    const { decisionId } = req.params;
+    const qubicPayments = require('../services/qubicPayments').getQubicPaymentService();
+    const decision = await qubicPayments.getDecision(decisionId);
+    
+    res.json({
+      success: true,
+      decision,
+      blockchain: 'qubic'
+    });
+  } catch (error) {
+    console.error('[API] Get decision error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// ==================== SERVICE INITIALIZATION ====================
+
+/**
+ * Initialize services (called from server.js)
+ */
+function initializeServices(services) {
+  remittanceService = services.remittanceService;
+  crossBorderService = services.crossBorderService;
+  exchangeRateService = services.exchangeRateService;
+  
+  console.log('[REMITTANCE ROUTES] Services initialized with Qubic support');
+}
+
 module.exports = {
-  // Routes are added directly to app in server.js
-  // This file provides the route definitions
+  router,
+  initializeServices
 };

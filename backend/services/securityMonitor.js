@@ -1,5 +1,5 @@
 // ============================================
-// ArcBot Security Layer - services/securityMonitor.js
+// QubicPay AI Security Layer - services/securityMonitor.js
 // AI-Powered Pattern Recognition & Fraud Detection
 // ============================================
 
@@ -29,7 +29,7 @@ class SecurityMonitor {
     
     this.db = admin.firestore();
     this.initialized = true;
-    console.log('✅ Security Monitor initialized');
+    console.log('✅ Security Monitor initialized (Qubic)');
   }
 
   // ==================== MAIN SECURITY CHECK ====================
@@ -46,7 +46,8 @@ class SecurityMonitor {
       riskScore: 0, // 0-100
       alerts: [],
       flags: [],
-      recommendation: 'APPROVE'
+      recommendation: 'APPROVE',
+      blockchain: 'qubic'
     };
 
     try {
@@ -60,6 +61,7 @@ class SecurityMonitor {
       await this.checkPatternAnomalies(checks, transaction, userProfile);
       await this.checkTimePatterns(checks, transaction, userProfile);
       await this.checkGeographicPatterns(checks, transaction, userProfile);
+      await this.checkBlockchainRisk(checks, transaction);
       
       // Calculate final risk score (0-100)
       checks.riskScore = this.calculateRiskScore(checks);
@@ -192,7 +194,7 @@ class SecurityMonitor {
       }
     }
     
-    // Check if address looks suspicious (vanity address, similar to known scams)
+    // Check if address looks suspicious
     if (this.isAddressSuspicious(recipient)) {
       checks.flags.push({
         type: 'SUSPICIOUS_ADDRESS',
@@ -211,7 +213,7 @@ class SecurityMonitor {
     const recentSnapshot = await this.db.collection('payment_history')
       .where('userId', '==', userId)
       .where('timestamp', '>', admin.firestore.Timestamp.fromMillis(
-        Date.now() - checks.transaction.rapidTransactionWindow || 5 * 60 * 1000
+        Date.now() - (checks.transaction.rapidTransactionWindow || 5 * 60 * 1000)
       ))
       .get();
     
@@ -246,54 +248,54 @@ class SecurityMonitor {
     }
   }
 
-// ==================== PATTERN ANOMALY DETECTION ====================
+  // ==================== PATTERN ANOMALY DETECTION ====================
 
-async checkPatternAnomalies(checks, transaction, profile) {
-  // Check if this breaks normal patterns
-  
-  // 1. Time pattern anomaly
-  const hour = new Date().getHours();
-  if (profile.patterns.activeHours.length > 0) {
-    const isUnusualHour = !profile.patterns.activeHours.includes(hour);
+  async checkPatternAnomalies(checks, transaction, profile) {
+    // Check if this breaks normal patterns
     
-    if (isUnusualHour && transaction.amount > 100) {
-      checks.flags.push({
-        type: 'UNUSUAL_TIME',
-        severity: 'MEDIUM',
-        message: `Transaction at ${hour}:00 - you don't usually transact at this time`,
-        recommendation: 'Verify you authorized this transaction'
-      });
-      checks.riskScore += 10;
+    // 1. Time pattern anomaly
+    const hour = new Date().getHours();
+    if (profile.patterns.activeHours.length > 0) {
+      const isUnusualHour = !profile.patterns.activeHours.includes(hour);
+      
+      if (isUnusualHour && transaction.amount > 100) {
+        checks.flags.push({
+          type: 'UNUSUAL_TIME',
+          severity: 'MEDIUM',
+          message: `Transaction at ${hour}:00 - you don't usually transact at this time`,
+          recommendation: 'Verify you authorized this transaction'
+        });
+        checks.riskScore += 10;
+      }
     }
-  }
-  
-  // 2. Day pattern anomaly
-  const dayOfWeek = new Date().getDay();
-  if (profile.patterns.activeDays.length > 0) {
-    const isUnusualDay = !profile.patterns.activeDays.includes(dayOfWeek);
     
-    if (isUnusualDay && transaction.amount > 100) {
+    // 2. Day pattern anomaly
+    const dayOfWeek = new Date().getDay();
+    if (profile.patterns.activeDays.length > 0) {
+      const isUnusualDay = !profile.patterns.activeDays.includes(dayOfWeek);
+      
+      if (isUnusualDay && transaction.amount > 100) {
+        checks.flags.push({
+          type: 'UNUSUAL_DAY',
+          severity: 'LOW',
+          message: 'Transaction on a day you don\'t typically make payments',
+          recommendation: 'Confirm this is authorized'
+        });
+        checks.riskScore += 5;
+      }
+    }
+    
+    // 3. Currency pattern
+    if (transaction.currency !== profile.patterns.primaryCurrency) {
       checks.flags.push({
-        type: 'UNUSUAL_DAY',
+        type: 'UNUSUAL_CURRENCY',
         severity: 'LOW',
-        message: 'Transaction on a day you don\'t typically make payments', // Fixed: escaped apostrophe
-        recommendation: 'Confirm this is authorized'
+        message: `Using ${transaction.currency} - you normally use ${profile.patterns.primaryCurrency}`,
+        recommendation: 'Verify currency is correct'
       });
       checks.riskScore += 5;
     }
   }
-  
-  // 3. Currency pattern
-  if (transaction.currency !== profile.patterns.primaryCurrency) {
-    checks.flags.push({
-      type: 'UNUSUAL_CURRENCY',
-      severity: 'LOW',
-      message: `Using ${transaction.currency} - you normally use ${profile.patterns.primaryCurrency}`,
-      recommendation: 'Verify currency is correct'
-    });
-    checks.riskScore += 5;
-  }
-}
 
   // ==================== TIME PATTERN CHECKS ====================
   
@@ -329,12 +331,46 @@ async checkPatternAnomalies(checks, transaction, profile) {
   
   async checkGeographicPatterns(checks, transaction, profile) {
     // Note: In production, integrate with IP geolocation API
-    // For now, this is a placeholder
-    
     if (transaction.metadata?.ipAddress) {
       // Check if IP is from unusual location
       // Check if IP is from known VPN/proxy (higher risk)
       // Check if IP changed rapidly (account sharing/compromise)
+    }
+  }
+
+  // ==================== BLOCKCHAIN-SPECIFIC CHECKS ====================
+
+  async checkBlockchainRisk(checks, transaction) {
+    // Qubic-specific risk checks
+    
+    // Check if transaction is being executed on Qubic
+    if (transaction.blockchain === 'qubic') {
+      // Lower risk for Qubic transactions (transparent on-chain)
+      checks.flags.push({
+        type: 'QUBIC_TRANSACTION',
+        severity: 'INFO',
+        message: 'Transaction will be logged on Qubic blockchain with full audit trail',
+        recommendation: 'All decisions are verifiable on-chain'
+      });
+      // No risk score change (informational only)
+    }
+
+    // Check if wallet address has on-chain activity
+    const recipient = transaction.payee;
+    if (recipient) {
+      // In production: Query Qubic explorer API for address history
+      // For now, this is a placeholder
+      const hasOnChainActivity = false; // Would check via API
+      
+      if (!hasOnChainActivity) {
+        checks.flags.push({
+          type: 'NEW_WALLET_ADDRESS',
+          severity: 'LOW',
+          message: 'Recipient appears to be a new wallet with no on-chain history',
+          recommendation: 'Verify this is the correct address'
+        });
+        checks.riskScore += 5;
+      }
     }
   }
 
@@ -543,6 +579,7 @@ async checkPatternAnomalies(checks, transaction, profile) {
       riskScore: checks.riskScore,
       flags: checks.flags,
       transaction: checks.transaction,
+      blockchain: checks.blockchain,
       read: false
     });
     

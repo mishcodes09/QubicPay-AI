@@ -4,23 +4,23 @@ const cron = require('node-cron');
 // MongoDB Connection
 const connectDB = async () => {
   try {
-    await mongoose.connect('mongodb://localhost:27017/arcbot', {
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/qubicpay', {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
-    console.log('✅ MongoDB connected successfully');
+    console.log('✅ MongoDB connected successfully (QubicPay)');
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);
     process.exit(1);
   }
 };
 
-// Scheduled Payment Schema
+// Scheduled Payment Schema with Qubic support
 const ScheduledPaymentSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   paymentId: { type: String, required: true, unique: true },
   
-  type: { type: String, enum: ['PAY', 'TRANSFER', 'SAVE'], required: true },
+  type: { type: String, enum: ['PAY', 'TRANSFER', 'SAVE', 'REMITTANCE'], required: true },
   payee: { type: String, required: true },
   amount: { type: Number, required: true },
   currency: { type: String, default: 'USDC' },
@@ -38,6 +38,17 @@ const ScheduledPaymentSchema = new mongoose.Schema({
     default: 'scheduled'
   },
   
+  // Qubic blockchain fields
+  blockchain: { type: String, default: 'qubic' },
+  decisionId: String,
+  decisionTxHash: String,
+  decisionExplorerUrl: String,
+  paymentTxHash: String,
+  paymentExplorerUrl: String,
+  blockNumber: Number,
+  gasUsed: String,
+  rationaleCID: String,
+  
   description: String,
   tags: [String],
   createdAt: { type: Date, default: Date.now },
@@ -45,7 +56,7 @@ const ScheduledPaymentSchema = new mongoose.Schema({
   failureReason: String
 });
 
-// Saved Transfer Schema
+// Saved Transfer Schema with Qubic support
 const SavedTransferSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   transferId: { type: String, required: true, unique: true },
@@ -55,8 +66,14 @@ const SavedTransferSchema = new mongoose.Schema({
   amount: Number,
   currency: { type: String, default: 'USDC' },
   
-  category: { type: String, enum: ['subscription', 'personal', 'savings', 'bills', 'other'] },
+  category: { type: String, enum: ['subscription', 'personal', 'savings', 'bills', 'other', 'remittance'] },
   favorite: { type: Boolean, default: false },
+  
+  // Qubic specific
+  blockchain: { type: String, default: 'qubic' },
+  qubicAddress: String,
+  onChainVerified: { type: Boolean, default: false },
+  
   lastUsed: Date,
   useCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }
@@ -65,10 +82,24 @@ const SavedTransferSchema = new mongoose.Schema({
 const ScheduledPayment = mongoose.model('ScheduledPayment', ScheduledPaymentSchema);
 const SavedTransfer = mongoose.model('SavedTransfer', SavedTransferSchema);
 
-// Payment Scheduler Service
+// Payment Scheduler Service with Qubic Integration
 class PaymentSchedulerService {
   constructor() {
+    this.qubicPayments = null;
+    this.initialized = false;
+  }
+  
+  async initialize() {
+    if (this.initialized) return;
+    
+    const { getQubicPaymentService } = require('./qubicPayments');
+    this.qubicPayments = getQubicPaymentService();
+    await this.qubicPayments.initialize();
+    
     this.initializeCronJobs();
+    this.initialized = true;
+    
+    console.log('✅ Payment Scheduler initialized with Qubic');
   }
   
   initializeCronJobs() {
@@ -77,7 +108,7 @@ class PaymentSchedulerService {
       await this.executeScheduledPayments();
     });
     
-    console.log('✅ Cron jobs initialized');
+    console.log('✅ Cron jobs initialized (Qubic)');
   }
   
   async schedulePayment(userId, paymentData) {
@@ -93,10 +124,12 @@ class PaymentSchedulerService {
       scheduledDate: new Date(paymentData.scheduledDate),
       recurring: paymentData.recurring || { enabled: false },
       description: paymentData.description,
-      tags: paymentData.tags || []
+      tags: paymentData.tags || [],
+      blockchain: 'qubic'
     });
     
     await scheduledPayment.save();
+    console.log(`✅ Payment scheduled: ${paymentId} via Qubic`);
     return scheduledPayment;
   }
   
@@ -115,27 +148,68 @@ class PaymentSchedulerService {
   
   async executePayment(payment) {
     try {
-      console.log(`💸 Executing payment: ${payment.paymentId}`);
+      console.log(`💸 Executing payment via Qubic: ${payment.paymentId}`);
       console.log(`   To: ${payment.payee}`);
       console.log(`   Amount: ${payment.amount} ${payment.currency}`);
       
-      // TODO: Integrate with your actual payment execution logic here
+      // Step 1: Log decision on Qubic
+      const decisionId = `scheduled_${payment.paymentId}`;
+      const decisionResult = await this.qubicPayments.logDecision({
+        decisionId,
+        actionSummary: `Scheduled payment: ${payment.amount} USDC to ${payment.payee}`,
+        rationaleCID: '',
+        amount: payment.amount,
+        riskScore: 5
+      });
       
-      payment.status = 'completed';
-      payment.executedAt = new Date();
-      await payment.save();
-      
-      if (payment.recurring.enabled) {
-        await this.scheduleRecurringPayment(payment);
+      if (!decisionResult.success) {
+        throw new Error(`Decision logging failed: ${decisionResult.error}`);
       }
       
-      return { success: true };
+      payment.decisionId = decisionId;
+      payment.decisionTxHash = decisionResult.txHash;
+      payment.decisionExplorerUrl = decisionResult.explorerUrl;
+      
+      // Step 2: Execute payment via PaymentRouter
+      const transferResult = await this.qubicPayments.instantTransfer({
+        recipient: payment.payee,
+        amount: payment.amount,
+        decisionId
+      });
+      
+      if (transferResult.success) {
+        // Update decision status
+        await this.qubicPayments.updateDecisionStatus(decisionId, 'executed', transferResult.txHash);
+        
+        payment.status = 'completed';
+        payment.executedAt = new Date();
+        payment.paymentTxHash = transferResult.txHash;
+        payment.paymentExplorerUrl = transferResult.explorerUrl;
+        payment.blockNumber = transferResult.blockNumber;
+        payment.gasUsed = transferResult.gasUsed;
+        await payment.save();
+        
+        console.log(`✅ Payment executed: ${transferResult.txHash}`);
+        
+        if (payment.recurring.enabled) {
+          await this.scheduleRecurringPayment(payment);
+        }
+        
+        return { success: true, payment };
+      } else {
+        throw new Error(transferResult.error || 'Payment execution failed');
+      }
     } catch (error) {
-      console.error('Error executing payment:', error);
+      console.error('❌ Error executing payment:', error);
       
       payment.status = 'failed';
       payment.failureReason = error.message;
       await payment.save();
+      
+      // Update decision status
+      if (payment.decisionId) {
+        await this.qubicPayments.updateDecisionStatus(payment.decisionId, 'failed', '');
+      }
       
       return { success: false, error: error.message };
     }
@@ -148,6 +222,7 @@ class PaymentSchedulerService {
     );
     
     if (payment.recurring.endDate && nextDate > payment.recurring.endDate) {
+      console.log(`⏹️ Recurring payment series ended: ${payment.paymentId}`);
       return;
     }
     
@@ -161,10 +236,12 @@ class PaymentSchedulerService {
       scheduledDate: nextDate,
       recurring: payment.recurring,
       description: payment.description,
-      tags: payment.tags
+      tags: payment.tags,
+      blockchain: 'qubic'
     });
     
     await nextPayment.save();
+    console.log(`🔁 Next recurring payment scheduled for ${nextDate.toISOString()}`);
     return nextPayment;
   }
   
@@ -200,10 +277,13 @@ class PaymentSchedulerService {
       amount: transferData.amount,
       currency: transferData.currency || 'USDC',
       category: transferData.category || 'other',
-      favorite: transferData.favorite || false
+      favorite: transferData.favorite || false,
+      blockchain: 'qubic',
+      qubicAddress: transferData.qubicAddress || transferData.payee
     });
     
     await savedTransfer.save();
+    console.log(`✅ Transfer saved: ${transferId}`);
     return savedTransfer;
   }
   
@@ -223,13 +303,49 @@ class PaymentSchedulerService {
     payment.status = 'cancelled';
     await payment.save();
     
+    // Update decision status if it exists
+    if (payment.decisionTxHash && this.qubicPayments) {
+      await this.qubicPayments.updateDecisionStatus(payment.decisionId, 'cancelled', '');
+    }
+    
+    console.log(`❌ Payment cancelled: ${paymentId}`);
     return payment;
   }
+  
+  async getPaymentStats(userId) {
+    const payments = await ScheduledPayment.find({ userId });
+    
+    return {
+      total: payments.length,
+      completed: payments.filter(p => p.status === 'completed').length,
+      scheduled: payments.filter(p => p.status === 'scheduled').length,
+      failed: payments.filter(p => p.status === 'failed').length,
+      totalVolume: payments
+        .filter(p => p.status === 'completed')
+        .reduce((sum, p) => sum + p.amount, 0),
+      blockchain: {
+        network: 'qubic',
+        withDecisionLogs: payments.filter(p => p.decisionTxHash).length,
+        onChainVerified: payments.filter(p => p.blockNumber).length
+      }
+    };
+  }
+}
+
+// Singleton instance
+let schedulerInstance = null;
+
+function getPaymentScheduler() {
+  if (!schedulerInstance) {
+    schedulerInstance = new PaymentSchedulerService();
+  }
+  return schedulerInstance;
 }
 
 module.exports = {
   connectDB,
   PaymentSchedulerService,
   ScheduledPayment,
-  SavedTransfer
+  SavedTransfer,
+  getPaymentScheduler
 };
