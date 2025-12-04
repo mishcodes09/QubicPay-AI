@@ -26,9 +26,9 @@ const { getExchangeRateService } = require('./services/exchangeRateService');
 const { getFirebaseScheduler } = require('./services/firebaseScheduler');
 const { getSecurityMonitor } = require('./services/securityMonitor');
 const { executePlan } = require('./orchestrator');
-const { logDecisionOnChain, getContractInfo, getDecisionFromChain, updateDecisionStatus } = require('./services/decisionLogger');
-const { parseInstructionWithScheduling, formatDateForDisplay } = require('./services/enhancedParser');
-const { getWalletService } = require('./services/walletService');
+const { logDecisionOnChain, updateDecisionStatus } = require('./decisionLogger');
+const { parseInstructionWithScheduling, formatDateForDisplay } = require('./enhancedParser');
+const { getWalletService } = require('./walletService');
 const { getQubicPaymentService } = require('./services/qubicPayments'); // Changed from thirdwebPayments
 
 const app = express();

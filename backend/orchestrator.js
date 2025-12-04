@@ -1,6 +1,6 @@
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
-const { logDecisionOnChain, updateDecisionStatus } = require('./services/decisionLogger');
+const { logDecisionOnChain, updateDecisionStatus } = require('./decisionLogger');
 
 class PaymentOrchestrator {
   constructor() {
