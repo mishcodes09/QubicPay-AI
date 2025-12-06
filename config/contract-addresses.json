@@ -1,0 +1,84 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2024-12-06T00:00:00Z",
+  
+  "testnet": {
+    "contractId": "",
+    "deploymentTx": "",
+    "deployTick": 0,
+    "deployedAt": "",
+    "network": "testnet",
+    "rpcEndpoint": "https://testnet-rpc.qubic.org/",
+    "explorerUrl": "https://testnet-explorer.qubic.org/",
+    "status": "pending_deployment",
+    "deployer": {
+      "publicKey": "",
+      "note": "Set by deployment script"
+    },
+    "oracle": {
+      "publicKey": "",
+      "authorized": false,
+      "note": "Must be authorized after deployment"
+    },
+    "procedures": {
+      "setOracleId": 0,
+      "depositFunds": 1,
+      "setVerificationScore": 2,
+      "releasePayment": 3,
+      "refundFunds": 4
+    },
+    "constants": {
+      "requiredScore": 95,
+      "platformFeePercent": 3,
+      "minRetentionDays": 7
+    }
+  },
+  
+  "mainnet": {
+    "contractId": "",
+    "deploymentTx": "",
+    "deployTick": 0,
+    "deployedAt": "",
+    "network": "mainnet",
+    "rpcEndpoint": "https://rpc.qubic.org/",
+    "explorerUrl": "https://explorer.qubic.org/",
+    "status": "not_deployed",
+    "deployer": {
+      "publicKey": "",
+      "note": "Use production wallet only"
+    },
+    "oracle": {
+      "publicKey": "",
+      "authorized": false,
+      "note": "Must be authorized after deployment"
+    },
+    "procedures": {
+      "setOracleId": 0,
+      "depositFunds": 1,
+      "setVerificationScore": 2,
+      "releasePayment": 3,
+      "refundFunds": 4
+    },
+    "constants": {
+      "requiredScore": 95,
+      "platformFeePercent": 3,
+      "minRetentionDays": 7
+    }
+  },
+  
+  "local": {
+    "contractId": "LOCAL_TEST_CONTRACT",
+    "network": "local",
+    "rpcEndpoint": "http://localhost:21841/",
+    "status": "test_only",
+    "note": "For local development and testing only"
+  },
+  
+  "deployment_history": [],
+  
+  "notes": {
+    "deployment": "Run: cd contract && ./deploy/deploy.sh [network]",
+    "oracle_auth": "After deployment: qubic-cli call <CONTRACT_ID> setOracleId --args <ORACLE_KEY>",
+    "verification": "Check status: qubic-cli query <CONTRACT_ID> getContractState"
+  }
+}

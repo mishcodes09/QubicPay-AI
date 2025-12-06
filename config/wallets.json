@@ -1,0 +1,70 @@
+{
+  "version": "1.0.0",
+  "network": "testnet",
+  "generated_at": "2024-12-06T00:00:00Z",
+  "note": "These are TEST wallets only. Never use on mainnet!",
+  
+  "brand": {
+    "name": "Brand Wallet",
+    "publicKey": "BRANDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "privateKey": "brandaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "balance": 10000000,
+    "created": "2024-12-06T00:00:00Z",
+    "purpose": "Brand deposits campaign payments",
+    "note": "Replace with actual generated keys"
+  },
+  
+  "influencer": {
+    "name": "Influencer Wallet",
+    "publicKey": "INFLURAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "privateKey": "influenceraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "balance": 1000000,
+    "created": "2024-12-06T00:00:00Z",
+    "purpose": "Influencer receives payments",
+    "note": "Replace with actual generated keys"
+  },
+  
+  "oracle": {
+    "name": "Oracle Wallet",
+    "publicKey": "ORACLEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "privateKey": "oracleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "balance": 100000,
+    "created": "2024-12-06T00:00:00Z",
+    "purpose": "Oracle submits verification scores",
+    "note": "Must be authorized in smart contract"
+  },
+  
+  "deployer": {
+    "name": "Deployer Wallet",
+    "publicKey": "DEPLOYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "privateKey": "deployeraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "balance": 5000000,
+    "created": "2024-12-06T00:00:00Z",
+    "purpose": "Deploys smart contract",
+    "note": "Only used for contract deployment"
+  },
+  
+  "instructions": {
+    "generate_new": "Run: node scripts/generate-wallets.js",
+    "format": {
+      "publicKey": "60 uppercase letters (A-Z)",
+      "privateKey": "55 lowercase letters (a-z)"
+    },
+    "security": [
+      "These are demo wallets - NOT for production use",
+      "Never commit real private keys to git",
+      "Never share private keys",
+      "For mainnet, use hardware wallet or secure key management"
+    ],
+    "testnet_faucet": "https://testnet.qubic.org/faucet"
+  },
+  
+  "examples": {
+    "valid_public_key": "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGH",
+    "valid_private_key": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+    "length": {
+      "publicKey": 60,
+      "privateKey": 55
+    }
+  }
+}

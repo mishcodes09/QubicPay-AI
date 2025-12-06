@@ -1,0 +1,207 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2024-12-06T00:00:00Z",
+  
+  "thresholds": {
+    "follower_authenticity": {
+      "min_score": 85,
+      "description": "Minimum percentage of real followers required",
+      "bot_username_patterns": [
+        "^user\\d{6,}$",
+        "^[a-z]+\\d{4,}$",
+        "^\\d+[a-z]+\\d+$"
+      ],
+      "max_following_ratio": 10,
+      "min_account_age_days": 30
+    },
+    
+    "engagement_quality": {
+      "min_score": 80,
+      "description": "Minimum percentage of authentic engagement",
+      "spam_phrases": [
+        "great post",
+        "nice",
+        "cool",
+        "awesome",
+        "check my bio",
+        "follow me",
+        "dm me",
+        "link in bio",
+        "click here"
+      ],
+      "max_duplicate_percentage": 10,
+      "min_comment_length": 10,
+      "max_emoji_only_percentage": 15
+    },
+    
+    "velocity_check": {
+      "anomaly_threshold": 2.5,
+      "description": "Maximum standard deviations from historical average",
+      "time_window_hours": 24,
+      "min_time_between_posts_hours": 1,
+      "spike_detection_window_minutes": 60
+    },
+    
+    "geo_alignment": {
+      "min_score": 60,
+      "description": "Minimum percentage from target regions",
+      "suspicious_locations": [
+        "Unknown",
+        "Bot Farm",
+        "Multiple"
+      ],
+      "expected_regions": {
+        "United States": ["United States", "Canada", "UK", "Australia"],
+        "United Kingdom": ["UK", "United States", "Europe", "Australia"],
+        "Canada": ["Canada", "United States", "UK"],
+        "Australia": ["Australia", "UK", "United States", "New Zealand"],
+        "Europe": ["UK", "Germany", "France", "Spain", "Italy"]
+      },
+      "bot_farm_countries": [
+        "Unknown",
+        "Bot Farm"
+      ],
+      "max_bot_farm_percentage": 20
+    },
+    
+    "overall": {
+      "pass_score": 95,
+      "description": "Minimum overall score required for payment approval",
+      "weights": {
+        "follower_authenticity": 0.30,
+        "engagement_quality": 0.35,
+        "velocity_check": 0.20,
+        "geo_alignment": 0.15
+      }
+    }
+  },
+  
+  "fraud_indicators": {
+    "critical": [
+      {
+        "name": "Bot Farm Detection",
+        "threshold": "bot_farm_percentage > 30%",
+        "action": "auto_reject"
+      },
+      {
+        "name": "Mass Bot Followers",
+        "threshold": "bot_followers > 70%",
+        "action": "auto_reject"
+      },
+      {
+        "name": "Spam Comments",
+        "threshold": "spam_percentage > 80%",
+        "action": "auto_reject"
+      }
+    ],
+    
+    "warning": [
+      {
+        "name": "Suspicious Velocity",
+        "threshold": "standard_deviations > 2.0",
+        "action": "flag_for_review"
+      },
+      {
+        "name": "Geographic Mismatch",
+        "threshold": "target_region_percentage < 40%",
+        "action": "flag_for_review"
+      },
+      {
+        "name": "Low Engagement Quality",
+        "threshold": "authentic_engagement < 60%",
+        "action": "flag_for_review"
+      }
+    ]
+  },
+  
+  "recommendations": {
+    "score_ranges": [
+      {
+        "range": [95, 100],
+        "recommendation": "APPROVED_FOR_PAYMENT",
+        "description": "Excellent authenticity, proceed with payment"
+      },
+      {
+        "range": [80, 94],
+        "recommendation": "APPROVED_WITH_MINOR_CONCERNS",
+        "description": "Good authenticity with minor issues"
+      },
+      {
+        "range": [60, 79],
+        "recommendation": "MANUAL_REVIEW_RECOMMENDED",
+        "description": "Mixed quality, human review advised"
+      },
+      {
+        "range": [40, 59],
+        "recommendation": "HOLD_PAYMENT_PENDING_REVIEW",
+        "description": "Significant fraud indicators detected"
+      },
+      {
+        "range": [0, 39],
+        "recommendation": "REJECT_PAYMENT_FRAUD_DETECTED",
+        "description": "Clear fraud, refund to brand"
+      }
+    ]
+  },
+  
+  "scenarios": {
+    "legitimate": {
+      "name": "Legitimate Campaign",
+      "description": "Real followers, authentic engagement, normal patterns",
+      "expected_score_range": [95, 100],
+      "characteristics": {
+        "follower_authenticity": 98,
+        "engagement_quality": 95,
+        "velocity_check": 100,
+        "geo_alignment": 90
+      }
+    },
+    
+    "bot_fraud": {
+      "name": "Bot Fraud Campaign",
+      "description": "Fake followers, spam comments, suspicious patterns",
+      "expected_score_range": [30, 50],
+      "characteristics": {
+        "follower_authenticity": 30,
+        "engagement_quality": 20,
+        "velocity_check": 40,
+        "geo_alignment": 35
+      }
+    },
+    
+    "mixed_quality": {
+      "name": "Mixed Quality Campaign",
+      "description": "Mix of real and fake engagement",
+      "expected_score_range": [70, 85],
+      "characteristics": {
+        "follower_authenticity": 75,
+        "engagement_quality": 70,
+        "velocity_check": 85,
+        "geo_alignment": 65
+      }
+    }
+  },
+  
+  "confidence_levels": {
+    "high": {
+      "description": "All indicators align, high certainty",
+      "variance_threshold": 10
+    },
+    "medium": {
+      "description": "Some conflicting indicators",
+      "variance_threshold": 20
+    },
+    "low": {
+      "description": "High variance between indicators",
+      "variance_threshold": 30
+    }
+  },
+  
+  "tuneable_parameters": {
+    "follower_sample_size": 1000,
+    "engagement_sample_size": 100,
+    "historical_data_days": 30,
+    "velocity_baseline_posts": 10,
+    "geo_location_sample_size": 500
+  }
+}

@@ -1,0 +1,370 @@
+/*
+ * Qubic Smart Escrow Contract
+ * AI-Verified Influencer Marketing Payment System
+ * 
+ * This contract implements a trustless escrow system where:
+ * - Brands lock payment funds
+ * - Oracle submits AI verification scores
+ * - Payments auto-release if score >= 95/100
+ * - Refunds issued if fraud detected
+ */
+
+#include "qpi.h"
+
+// Contract state structure
+struct CONTRACT_STATE {
+    // Parties
+    id brandId;              // Brand depositing payment
+    id influencerId;         // Influencer receiving payment
+    id oracleId;            // Authorized oracle for verification
+    
+    // Payment details
+    sint64 escrowBalance;    // Amount locked in escrow
+    sint64 platformFee;      // 2-5% fee for verification service
+    
+    // Verification parameters
+    uint8 requiredScore;     // Minimum score needed (default: 95)
+    uint8 verificationScore; // Current score from AI (0-100)
+    
+    // Timing
+    uint32 retentionEndTick; // Tick when retention period ends
+    uint32 depositTick;      // Tick when funds deposited
+    
+    // State flags
+    bool isActive;           // Contract is active
+    bool isVerified;         // Verification submitted
+    bool isPaid;             // Payment released
+    bool isRefunded;         // Funds refunded
+    bool oracleSet;          // Oracle has been authorized
+};
+
+// Global contract state
+CONTRACT_STATE state;
+
+// Configuration constants
+static const uint8 DEFAULT_REQUIRED_SCORE = 95;
+static const uint8 PLATFORM_FEE_PERCENT = 3; // 3% platform fee
+static const uint32 MIN_RETENTION_TICKS = 100800; // ~7 days in ticks
+
+/*
+ * Initialize contract state
+ * Called once when contract is deployed
+ */
+PRIVATE void initialize() {
+    // Reset all state
+    qpi.setMem(&state, 0, sizeof(CONTRACT_STATE));
+    
+    state.requiredScore = DEFAULT_REQUIRED_SCORE;
+    state.isActive = false;
+    state.isVerified = false;
+    state.isPaid = false;
+    state.isRefunded = false;
+    state.oracleSet = false;
+    state.escrowBalance = 0;
+    state.platformFee = 0;
+    state.verificationScore = 0;
+    state.retentionEndTick = 0;
+    state.depositTick = 0;
+}
+
+/*
+ * Set authorized oracle (one-time operation)
+ * Can only be called by contract owner/deployer
+ * 
+ * Input: Oracle ID (60 chars)
+ */
+PUBLIC_PROCEDURE(setOracleId) {
+    // Validate caller is owner/deployer
+    if (state.oracleSet) {
+        // Oracle already set, cannot change
+        return;
+    }
+    
+    // Get oracle ID from input
+    id newOracleId;
+    qpi.getInput(0, &newOracleId, sizeof(id));
+    
+    // Set oracle
+    qpi.copyMem(&state.oracleId, &newOracleId, sizeof(id));
+    state.oracleSet = true;
+    
+    // Emit event
+    qpi.logMessage("Oracle authorized");
+}
+
+/*
+ * Deposit funds into escrow
+ * Called by brand to lock payment for influencer campaign
+ * 
+ * Input:
+ * - amount: Payment amount (sint64)
+ * - influencerId: Influencer address (id)
+ * - retentionDays: Days to retain post (uint32)
+ */
+PUBLIC_PROCEDURE(depositFunds) {
+    // Check contract not already active
+    if (state.isActive) {
+        qpi.logMessage("Contract already active");
+        return;
+    }
+    
+    // Check oracle is set
+    if (!state.oracleSet) {
+        qpi.logMessage("Oracle not yet authorized");
+        return;
+    }
+    
+    // Get input parameters
+    struct DepositInput {
+        sint64 amount;
+        id influencerId;
+        uint32 retentionDays;
+    } input;
+    
+    qpi.getInput(0, &input, sizeof(DepositInput));
+    
+    // Validate amount
+    if (input.amount <= 0) {
+        qpi.logMessage("Invalid amount");
+        return;
+    }
+    
+    // Validate retention period
+    uint32 retentionTicks = input.retentionDays * 14400; // ~1 day = 14400 ticks
+    if (retentionTicks < MIN_RETENTION_TICKS) {
+        qpi.logMessage("Retention period too short");
+        return;
+    }
+    
+    // Get brand ID from transaction
+    id brandId;
+    qpi.getSourcePublicKey(&brandId);
+    
+    // Calculate platform fee
+    sint64 fee = (input.amount * PLATFORM_FEE_PERCENT) / 100;
+    sint64 escrowAmount = input.amount - fee;
+    
+    // Transfer funds from brand to contract
+    if (!qpi.transfer(qpi.getContractId(), input.amount)) {
+        qpi.logMessage("Transfer failed");
+        return;
+    }
+    
+    // Update state
+    qpi.copyMem(&state.brandId, &brandId, sizeof(id));
+    qpi.copyMem(&state.influencerId, &input.influencerId, sizeof(id));
+    state.escrowBalance = escrowAmount;
+    state.platformFee = fee;
+    state.depositTick = qpi.getCurrentTick();
+    state.retentionEndTick = state.depositTick + retentionTicks;
+    state.isActive = true;
+    
+    // Emit event
+    qpi.logMessage("Funds deposited successfully");
+}
+
+/*
+ * Set verification score
+ * Called by authorized oracle with AI verification result
+ * 
+ * Input: score (uint8, 0-100)
+ */
+PUBLIC_PROCEDURE(setVerificationScore) {
+    // Check contract is active
+    if (!state.isActive) {
+        qpi.logMessage("Contract not active");
+        return;
+    }
+    
+    // Check already verified
+    if (state.isVerified) {
+        qpi.logMessage("Already verified");
+        return;
+    }
+    
+    // Check caller is authorized oracle
+    id callerId;
+    qpi.getSourcePublicKey(&callerId);
+    
+    if (!qpi.compareMem(&callerId, &state.oracleId, sizeof(id))) {
+        qpi.logMessage("Unauthorized: Not oracle");
+        return;
+    }
+    
+    // Get score from input
+    uint8 score;
+    qpi.getInput(0, &score, sizeof(uint8));
+    
+    // Validate score range
+    if (score > 100) {
+        qpi.logMessage("Invalid score");
+        return;
+    }
+    
+    // Update state
+    state.verificationScore = score;
+    state.isVerified = true;
+    
+    // Emit event with score
+    qpi.logMessage("Verification score set");
+}
+
+/*
+ * Release payment to influencer
+ * Can be called by anyone once conditions are met:
+ * - Verification score >= required score
+ * - Retention period ended
+ */
+PUBLIC_PROCEDURE(releasePayment) {
+    // Check contract is active
+    if (!state.isActive) {
+        qpi.logMessage("Contract not active");
+        return;
+    }
+    
+    // Check not already paid
+    if (state.isPaid) {
+        qpi.logMessage("Already paid");
+        return;
+    }
+    
+    // Check not refunded
+    if (state.isRefunded) {
+        qpi.logMessage("Already refunded");
+        return;
+    }
+    
+    // Check verification submitted
+    if (!state.isVerified) {
+        qpi.logMessage("Not yet verified");
+        return;
+    }
+    
+    // Check score meets threshold
+    if (state.verificationScore < state.requiredScore) {
+        qpi.logMessage("Score too low");
+        return;
+    }
+    
+    // Check retention period ended
+    uint32 currentTick = qpi.getCurrentTick();
+    if (currentTick < state.retentionEndTick) {
+        qpi.logMessage("Retention period not ended");
+        return;
+    }
+    
+    // Transfer escrow to influencer
+    if (!qpi.transfer(&state.influencerId, state.escrowBalance)) {
+        qpi.logMessage("Transfer to influencer failed");
+        return;
+    }
+    
+    // Transfer fee to contract owner/platform
+    if (state.platformFee > 0) {
+        id contractOwner;
+        qpi.getContractOwner(&contractOwner);
+        qpi.transfer(&contractOwner, state.platformFee);
+    }
+    
+    // Update state
+    state.isPaid = true;
+    state.isActive = false;
+    
+    // Emit event
+    qpi.logMessage("Payment released to influencer");
+}
+
+/*
+ * Refund payment to brand
+ * Can be called if:
+ * - Verification score < required score (fraud detected)
+ * - Retention period ended without meeting criteria
+ */
+PUBLIC_PROCEDURE(refundFunds) {
+    // Check contract is active
+    if (!state.isActive) {
+        qpi.logMessage("Contract not active");
+        return;
+    }
+    
+    // Check not already paid
+    if (state.isPaid) {
+        qpi.logMessage("Already paid");
+        return;
+    }
+    
+    // Check not already refunded
+    if (state.isRefunded) {
+        qpi.logMessage("Already refunded");
+        return;
+    }
+    
+    // Check verification submitted
+    if (!state.isVerified) {
+        qpi.logMessage("Not yet verified");
+        return;
+    }
+    
+    // Check score is below threshold (fraud detected)
+    if (state.verificationScore >= state.requiredScore) {
+        qpi.logMessage("Score meets threshold - use releasePayment");
+        return;
+    }
+    
+    // Calculate refund amount (escrow + fee)
+    sint64 refundAmount = state.escrowBalance + state.platformFee;
+    
+    // Transfer funds back to brand
+    if (!qpi.transfer(&state.brandId, refundAmount)) {
+        qpi.logMessage("Refund transfer failed");
+        return;
+    }
+    
+    // Update state
+    state.isRefunded = true;
+    state.isActive = false;
+    
+    // Emit event
+    qpi.logMessage("Funds refunded to brand");
+}
+
+/*
+ * Query contract state
+ * Returns current contract information
+ */
+PUBLIC_FUNCTION(getContractState) {
+    struct StateResponse {
+        id brandId;
+        id influencerId;
+        id oracleId;
+        sint64 escrowBalance;
+        uint8 requiredScore;
+        uint8 verificationScore;
+        uint32 retentionEndTick;
+        bool isActive;
+        bool isVerified;
+        bool isPaid;
+        bool isRefunded;
+    } response;
+    
+    qpi.copyMem(&response.brandId, &state.brandId, sizeof(id));
+    qpi.copyMem(&response.influencerId, &state.influencerId, sizeof(id));
+    qpi.copyMem(&response.oracleId, &state.oracleId, sizeof(id));
+    response.escrowBalance = state.escrowBalance;
+    response.requiredScore = state.requiredScore;
+    response.verificationScore = state.verificationScore;
+    response.retentionEndTick = state.retentionEndTick;
+    response.isActive = state.isActive;
+    response.isVerified = state.isVerified;
+    response.isPaid = state.isPaid;
+    response.isRefunded = state.isRefunded;
+    
+    qpi.setOutput(&response, sizeof(StateResponse));
+}
+
+/*
+ * Constructor - Initialize contract when deployed
+ */
+CONSTRUCTOR {
+    initialize();
+}

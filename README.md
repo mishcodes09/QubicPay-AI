@@ -1,837 +1,592 @@
-# 🤖 ArcBot AI - Intelligent Cryptocurrency Payment Assistant
+# 🛠 Qubic Smart Escrow - Complete Project Structure
 
-<div align="center">
-
-![ArcBot AI](https://img.shields.io/badge/ArcBot-AI%20Powered-00D4FF?style=for-the-badge&logo=ethereum&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
-![Arc Blockchain](https://img.shields.io/badge/Arc-Testnet-purple?style=for-the-badge)
-
-**Voice-Activated AI Assistant for Blockchain Payments**
-
-[Features](#-features) • [Demo](#-demo) • [Installation](#-installation) • [Documentation](#-documentation) • [Contributing](#-contributing)
-
-</div>
-
----
-
-## 📋 Table of Contents
-
-- [Overview](#-overview)
-- [Key Features](#-features)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Getting Started](#-getting-started)
-- [Configuration](#-configuration)
-- [API Documentation](#-api-documentation)
-- [Smart Contract](#-smart-contract)
-- [Security](#-security)
-- [Cross-Border Remittances](#-cross-border-remittances)
-- [Deployment](#-deployment)
-- [Contributing](#-contributing)
-- [License](#-license)
-
----
-
-## 🌟 Overview
-
-**ArcBot AI** is a sophisticated, voice-activated cryptocurrency payment platform that combines conversational AI, blockchain technology, and intelligent automation. Built on the Arc blockchain testnet, it enables users to execute payments, schedule transactions, and send cross-border remittances using natural language commands.
-
-### Why ArcBot?
-
-- 🎤 **Voice-First Interface** - Control payments hands-free with natural speech
-- 🧠 **AI-Powered Memory** - Remembers your payment history and preferences
-- 🔐 **Enterprise Security** - Multi-layer fraud detection and risk scoring
-- 🌍 **Global Remittances** - Send to 7 African countries with minimal fees (1.5% vs 5-10%)
-- ⚡ **Real-Time Execution** - Instant payments with blockchain transparency
-- 📅 **Smart Scheduling** - One-time and recurring payment automation
-
----
-
-## ✨ Features
-
-### Core Capabilities
-
-#### 🎙️ Voice-Activated Payments
-- **Always-On Listening** - Continuous voice recognition without wake words
-- **Natural Language Processing** - Understands conversational payment requests
-- **Real-Time Feedback** - Visual and audio confirmation of commands
-- **Browser-Based** - No additional software required
-
-#### 💰 Payment Management
-- **Instant Transfers** - Send USDC on Arc blockchain in seconds
-- **Payment Scheduling** - Schedule one-time or recurring payments
-- **Saved Recipients** - Quick access to frequent contacts
-- **Transaction History** - Complete audit trail with blockchain verification
-
-#### 🧠 AI Memory System
-- **Contextual Awareness** - Remembers past 30 days of transactions
-- **Spending Analytics** - Track patterns and frequent recipients
-- **Temporal Queries** - "What did I spend last Friday?"
-- **Smart Suggestions** - Learns your payment habits
-
-#### 🌍 Cross-Border Remittances
-Support for **7 African Countries**:
-- 🇰🇪 **Kenya** (KES) - M-Pesa integration
-- 🇳🇬 **Nigeria** (NGN) - Bank transfers
-- 🇿🇦 **South Africa** (ZAR) - Instant EFT
-- 🇬🇭 **Ghana** (GHS) - Mobile money
-- 🇺🇬 **Uganda** (UGX) - Mobile money
-- 🇹🇿 **Tanzania** (TZS) - M-Pesa
-- 🇷🇼 **Rwanda** (RWF) - MTN Mobile Money
-
-**Benefits:**
-- 💸 **Low Fees**: 1.5% vs traditional 5-10%
-- ⚡ **Fast Delivery**: 5-15 minutes vs 1-3 days
-- 📱 **Direct to Mobile**: No bank account needed
-- 💱 **Real-Time Rates**: Live exchange rate updates
-
-#### 🔐 Security Features
-- **AI-Powered Fraud Detection** - Real-time risk scoring
-- **Transaction Limits** - Configurable daily/single transaction caps
-- **Velocity Checks** - Detect unusual spending patterns
-- **Blacklist Screening** - Block known malicious addresses
-- **2FA Support** - Additional verification for high-risk transactions
-- **Audit Trail** - Immutable on-chain decision logging
-
----
-
-## 🏗️ Architecture
+## 📁 Directory Structure
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Frontend (React)                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │   AI Face    │  │ Voice Input  │  │ Chat UI      │ │
-│  │  Animation   │  │ Web Speech   │  │ Dashboard    │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-└────────────────────────┬────────────────────────────────┘
-                         │ REST API
-┌────────────────────────▼────────────────────────────────┐
-│              Backend (Node.js + Express)                │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  Payment Engine  │  AI Chat  │  Scheduler       │  │
-│  │  Thirdweb x402   │  Memory   │  Firebase        │  │
-│  └──────────────────────────────────────────────────┘  │
-└──┬──────────┬──────────┬──────────┬────────────┬───────┘
-   │          │          │          │            │
-   ▼          ▼          ▼          ▼            ▼
-┌─────┐  ┌─────────┐ ┌──────┐ ┌─────────┐ ┌──────────┐
-│ Arc │  │Cloudflare│ │Firebase│ │Security │ │ElevenLabs│
-│Testnet  │ AI      │ │Firestore│ │Monitor │ │   TTS    │
-└─────┘  └─────────┘ └──────┘ └─────────┘ └──────────┘
+qubic-smart-escrow/
+│
+├── contract/                           # Smart Contract (On-Chain)
+│   ├── src/
+│   │   └── escrow.qpi                 # Main escrow contract (C++)
+│   ├── deploy/
+│   │   ├── deploy.sh                  # Deployment script
+│   │   └── config.json                # Network configuration
+│   ├── test/
+│   │   └── escrow.test.cpp           # Contract unit tests
+│   └── README.md
+│
+├── backend/                            # Backend Services (Off-Chain)
+│   │
+│   ├── ai-verification/               # Python AI Service
+│   │   ├── src/
+│   │   │   ├── __init__.py
+│   │   │   ├── ai_verifier.py        # Main AI scoring engine
+│   │   │   ├── data_fetcher.py       # Social media data fetcher
+│   │   │   ├── fraud_detector.py     # Fraud detection algorithms
+│   │   │   ├── models/
+│   │   │   │   ├── follower_check.py
+│   │   │   │   ├── engagement_check.py
+│   │   │   │   └── velocity_check.py
+│   │   │   └── config.py             # Configuration
+│   │   ├── tests/
+│   │   │   └── test_ai_verifier.py
+│   │   ├── requirements.txt          # Python dependencies
+│   │   ├── Dockerfile
+│   │   └── README.md
+│   │
+│   ├── oracle-agent/                  # Node.js Oracle Service
+│   │   ├── src/
+│   │   │   ├── index.ts              # Main Oracle server
+│   │   │   ├── qubicClient.ts        # Qubic network client
+│   │   │   ├── transactionBuilder.ts # Build & sign transactions
+│   │   │   ├── aiClient.ts           # AI service integration
+│   │   │   ├── config.ts             # Oracle configuration
+│   │   │   └── types.ts              # TypeScript types
+│   │   ├── tests/
+│   │   │   └── oracle.test.ts
+│   │   ├── package.json
+│   │   ├── tsconfig.json
+│   │   ├── Dockerfile
+│   │   └── README.md
+│   │
+│   └── docker-compose.yml             # Run both services together
+│
+├── frontend/                           # React Dashboard
+│   ├── public/
+│   │   ├── index.html
+│   │   └── favicon.ico
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── WalletConnect.tsx
+│   │   │   ├── BrandDashboard.tsx
+│   │   │   ├── InfluencerDashboard.tsx
+│   │   │   ├── VerificationDisplay.tsx
+│   │   │   ├── TransactionHistory.tsx
+│   │   │   └── ContractInteraction.tsx
+│   │   ├── services/
+│   │   │   ├── qubicService.ts       # Qubic blockchain interaction
+│   │   │   ├── apiService.ts         # Backend API calls
+│   │   │   └── walletService.ts      # Wallet management
+│   │   ├── hooks/
+│   │   │   ├── useQubicWallet.ts
+│   │   │   └── useContractState.ts
+│   │   ├── utils/
+│   │   │   └── helpers.ts
+│   │   ├── App.tsx
+│   │   ├── index.tsx
+│   │   └── styles/
+│   │       └── globals.css
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── tailwind.config.js
+│   └── README.md
+│
+├── scripts/                            # Utility Scripts
+│   ├── generate-wallets.js            # Generate Qubic wallets
+│   ├── setup-testnet.sh               # Setup testnet environment
+│   ├── demo-scenario.js               # Automated demo script
+│   └── deploy-all.sh                  # Deploy all components
+│
+├── docs/                               # Documentation
+│   ├── ARCHITECTURE.md                # System architecture
+│   ├── API.md                         # API documentation
+│   ├── DEPLOYMENT.md                  # Deployment guide
+│   ├── DEMO.md                        # Demo script for judges
+│   └── TROUBLESHOOTING.md
+│
+├── config/                             # Configuration Files
+│   ├── wallets.json                   # Test wallet addresses
+│   ├── contract-addresses.json        # Deployed contract info
+│   └── ai-thresholds.json             # Verification score rules
+│
+├── tests/                              # Integration Tests
+│   ├── integration/
+│   │   ├── full-flow.test.js
+│   │   └── fraud-detection.test.js
+│   └── e2e/
+│       └── user-flow.test.js
+│
+├── .env.example                        # Environment variables template
+├── .gitignore
+├── docker-compose.yml                  # Full stack setup
+├── LICENSE
+└── README.md                           # Project overview
 ```
 
-### Component Overview
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Frontend** | React 18 + TypeScript | User interface with 3D animations |
-| **Backend API** | Node.js + Express | Payment processing & orchestration |
-| **AI Engine** | Cloudflare Workers AI | Natural language understanding |
-| **Blockchain** | Arc Testnet + Solidity | Transaction execution & logging |
-| **Database** | Firebase Firestore | User data & scheduling |
-| **Payment Rails** | Thirdweb x402 | Blockchain payment abstraction |
-| **Voice** | Web Speech API | Voice recognition |
-| **TTS** | ElevenLabs | Text-to-speech synthesis |
-
 ---
 
-## 🛠️ Tech Stack
+## 🔧 Component Details
 
-### Frontend
-- **React 18** - Modern UI framework
-- **TypeScript** - Type-safe development
-- **Tailwind CSS** - Utility-first styling
-- **Lucide React** - Beautiful icons
-- **Web Speech API** - Voice recognition
-- **Web Audio API** - Lip-sync animation
+### 1️⃣ SMART CONTRACT (`/contract`)
 
-### Backend
-- **Node.js 18+** - JavaScript runtime
-- **Express.js** - Web framework
-- **Ethers.js** - Blockchain interaction
-- **Axios** - HTTP client
-- **Firebase Admin SDK** - Database & auth
+**Technology:** C++ with Qubic Programming Interface (QPI)
 
-### Blockchain
-- **Solidity ^0.8.30** - Smart contract language
-- **Arc Blockchain** - Layer 2 testnet
-- **Thirdweb x402** - Payment infrastructure
-- **USDC** - Stablecoin payments
+**Key Files:**
+- `escrow.qpi` - Main smart contract with 5 procedures
+- `deploy.sh` - Automated deployment to Qubic testnet
 
-### AI & Services
-- **Cloudflare Workers AI** - LLM inference
-- **ElevenLabs** - Voice synthesis
-- **Firebase Firestore** - Real-time database
-- **Firebase Cloud Functions** - Scheduled jobs
+**Functions:**
+1. `depositFunds()` - Brand locks payment
+2. `setVerificationScore()` - Oracle updates AI score
+3. `releasePayment()` - Auto-release if verified
+4. `refundFunds()` - Return funds if fraud detected
+5. `setOracleId()` - One-time oracle authorization
 
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
+**Setup:**
 ```bash
-# Required
-Node.js >= 18.0.0
-npm >= 8.0.0 or yarn >= 1.22.0
+cd contract
+# Install Qubic CLI
+npm install -g @qubic-lib/cli
 
-# Optional
-Firebase CLI (for deployment)
-Git
+# Deploy to testnet
+./deploy/deploy.sh --network testnet
 ```
 
-### Installation
+---
 
-1. **Clone the repository**
+### 2️⃣ AI VERIFICATION SERVICE (`/backend/ai-verification`)
+
+**Technology:** Python 3.9+ with Pandas, NumPy, Scikit-learn
+
+**Key Files:**
+- `ai_verifier.py` - Main AI engine
+- `data_fetcher.py` - Social media data collection
+- `fraud_detector.py` - 4 fraud detection algorithms
+
+**Features:**
+- Fake follower detection (bot signals)
+- Engagement quality analysis (spam comments)
+- Velocity anomaly detection (sudden spikes)
+- Geo-location mismatch detection
+
+**Setup:**
 ```bash
-git clone https://github.com/yourusername/arcbot-ai.git
-cd arcbot-ai
+cd backend/ai-verification
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Run service
+python src/ai_verifier.py
 ```
 
-2. **Install dependencies**
+**API Endpoint:**
+```
+POST /verify
+{
+  "post_url": "https://instagram.com/p/...",
+  "scenario": "legitimate"
+}
+
+Response:
+{
+  "overall_score": 96,
+  "breakdown": {...},
+  "fraud_flags": [],
+  "recommendation": "APPROVED_FOR_PAYMENT"
+}
+```
+
+---
+
+### 3️⃣ ORACLE AGENT (`/backend/oracle-agent`)
+
+**Technology:** Node.js 18+ with TypeScript
+
+**Key Files:**
+- `index.ts` - Main Oracle service
+- `qubicClient.ts` - Blockchain interaction
+- `transactionBuilder.ts` - Transaction signing
+
+**Responsibilities:**
+1. Monitor for new escrows
+2. Call AI verification service
+3. Sign transactions with Oracle key
+4. Submit scores to smart contract
+
+**Setup:**
 ```bash
-# Backend
-cd backend
+cd backend/oracle-agent
 npm install
 
-# Frontend
-cd ../frontend
-npm install
-```
+# Configure environment
+cp .env.example .env
+# Edit .env with your keys
 
-3. **Configure environment variables**
-
-Create `.env` in the backend directory:
-
-```env
-# Wallet Configuration
-USER_WALLET_ADDRESS=0xYourWalletAddress
-ARC_USDC_CONTRACT=0x3C3380cdFb94dFEEaA41cAD9F58254AE380d752D
-
-# Cloudflare AI
-CLOUDFLARE_WORKER_URL=https://your-worker.workers.dev
-
-# Firebase
-FIREBASE_CREDENTIALS_PATH=./firebase-credentials.json
-
-# Blockchain
-DECISION_CONTRACT_ADDRESS=0xYourContractAddress
-PRIVATE_KEY=0xYourPrivateKey
-
-# API Services
-ELEVENLABS_KEY=sk_your_key_here
-
-# Server
-PORT=4000
-CORS_ORIGIN=http://localhost:3000
-```
-
-4. **Set up Firebase**
-- Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com)
-- Enable Firestore Database
-- Download service account credentials
-- Save as `firebase-credentials.json` in backend directory
-
-5. **Deploy Smart Contract (optional)**
-```bash
-cd contracts
-npx hardhat compile
-npx hardhat run scripts/deploy.js --network arc-testnet
-```
-
-6. **Start the application**
-
-```bash
-# Terminal 1 - Backend
-cd backend
+# Run service
 npm run dev
+```
 
-# Terminal 2 - Frontend
+**Environment Variables:**
+```env
+QUBIC_RPC_ENDPOINT=https://testnet-rpc.qubic.org/
+CONTRACT_ID=your_contract_id
+ORACLE_PRIVATE_KEY=your_private_key
+ORACLE_PUBLIC_KEY=your_public_key
+AI_SERVICE_URL=http://localhost:5000
+```
+
+---
+
+### 4️⃣ FRONTEND DASHBOARD (`/frontend`)
+
+**Technology:** React 18 + TypeScript + TailwindCSS
+
+**Key Features:**
+- Wallet connection (Brand & Influencer)
+- Contract deployment interface
+- Real-time AI verification display
+- Transaction history
+- Payment settlement
+
+**Setup:**
+```bash
 cd frontend
+npm install
+
+# Run development server
+npm start
+
+# Build for production
+npm run build
+```
+
+**Available Scripts:**
+- `npm start` - Development server (port 3000)
+- `npm test` - Run tests
+- `npm run build` - Production build
+
+---
+
+## 🚀 Quick Start Guide
+
+### Option 1: Docker (Recommended)
+
+```bash
+# Clone repository
+git clone https://github.com/your-org/qubic-smart-escrow.git
+cd qubic-smart-escrow
+
+# Start all services
+docker-compose up
+
+# Services will be available at:
+# - Frontend: http://localhost:3000
+# - AI Service: http://localhost:5000
+# - Oracle Agent: http://localhost:8080
+```
+
+### Option 2: Manual Setup
+
+```bash
+# 1. Deploy Smart Contract
+cd contract
+./deploy/deploy.sh
+
+# 2. Start AI Service
+cd ../backend/ai-verification
+python src/ai_verifier.py &
+
+# 3. Start Oracle Agent
+cd ../oracle-agent
+npm run dev &
+
+# 4. Start Frontend
+cd ../../frontend
 npm start
 ```
 
-7. **Access the application**
-- Open browser to `http://localhost:3000`
-- Allow microphone access for voice features
-
 ---
 
-## ⚙️ Configuration
+## 📋 Development Workflow
 
-### Firebase Setup
-
-1. **Firestore Collections**
-```javascript
-// Required collections
-- scheduled_payments
-- payment_history
-- saved_transfers
-- security_alerts
-- security_checks
-```
-
-2. **Security Rules**
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /scheduled_payments/{payment} {
-      allow read, write: if request.auth != null;
-    }
-    match /payment_history/{history} {
-      allow read: if request.auth != null;
-      allow write: if false; // Server-only
-    }
-  }
-}
-```
-
-### Cloudflare Worker Deployment
-
+### Phase 1: Local Development (Hours 0-4)
 ```bash
-# Deploy AI chat worker
-cd cloudflare-worker
-wrangler publish
+# Generate test wallets
+node scripts/generate-wallets.js
+
+# This creates:
+# - Brand wallet
+# - Influencer wallet
+# - Oracle wallet
 ```
 
-### Smart Contract Deployment
-
-```solidity
-// Deploy to Arc testnet
-npx hardhat run scripts/deploy.js --network arc-testnet
-
-// Verify contract
-npx hardhat verify --network arc-testnet DEPLOYED_ADDRESS
-```
-
----
-
-## 📚 API Documentation
-
-### Core Endpoints
-
-#### User Profile
-```http
-GET /api/me
-```
-Returns wallet balance, address, and user preferences.
-
-**Response:**
-```json
-{
-  "id": "demo-user",
-  "wallet": {
-    "address": "0x...",
-    "balance": 100.50,
-    "arcBalance": 5.25,
-    "transactionCount": 42
-  },
-  "agent": {
-    "personality": "balanced",
-    "dailyLimit": 500
-  }
-}
-```
-
-#### Execute Payment
-```http
-POST /api/thirdweb/payment/send
-Content-Type: application/json
-
-{
-  "to": "0xRecipientAddress",
-  "amount": 10.50,
-  "currency": "USDC",
-  "description": "Payment for services"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "txHash": "0x...",
-  "explorerUrl": "https://...",
-  "newBalance": 90.00
-}
-```
-
-#### AI Chat
-```http
-POST /api/chat
-Content-Type: application/json
-X-User-ID: demo-user
-
-{
-  "messages": [
-    {
-      "role": "user",
-      "content": "Send 0.001 USDC to 0x64EE..."
-    }
-  ]
-}
-```
-
-**Response:** Server-Sent Events (SSE)
-```
-data: {"content": "I'll prepare"}
-data: {"content": " that payment"}
-data: [DONE]
-```
-
-#### Schedule Payment
-```http
-POST /api/scheduler/schedule
-Content-Type: application/json
-X-User-ID: demo-user
-
-{
-  "payee": "0x...",
-  "amount": 50,
-  "currency": "USDC",
-  "scheduledDate": "2025-11-15T10:00:00Z",
-  "recurring": {
-    "enabled": true,
-    "frequency": "monthly"
-  }
-}
-```
-
-### Remittance Endpoints
-
-#### Get Exchange Rates
-```http
-GET /api/remittance/rates
-```
-
-#### Send Remittance
-```http
-POST /api/remittance/send
-Content-Type: application/json
-
-{
-  "country": "Kenya",
-  "countryCode": "KE",
-  "recipientName": "Jane Doe",
-  "phoneNumber": "+254712345678",
-  "amount": 50,
-  "currency": "USDC",
-  "deliveryMethod": "mobile_money"
-}
-```
-
-### Security Endpoints
-
-#### Get Security Profile
-```http
-GET /api/security/profile
-X-User-ID: demo-user
-```
-
-#### Get Security Alerts
-```http
-GET /api/security/alerts?limit=20
-X-User-ID: demo-user
-```
-
-[View Full API Documentation →](./docs/API.md)
-
----
-
-## 📜 Smart Contract
-
-### ArcBotDecisionLogger.sol
-
-The smart contract provides immutable logging of all AI payment decisions on the Arc blockchain.
-
-#### Key Features
-- **Decision Logging** - Records AI payment decisions
-- **Status Tracking** - Updates decision status (LOGGED, EXECUTED, FAILED, CANCELLED)
-- **Agent Management** - Authorization system for AI agents
-- **Audit Trail** - Complete transaction history
-- **IPFS Integration** - Detailed rationale stored on IPFS
-
-#### Contract Functions
-
-```solidity
-// Log a new decision
-function logDecision(
-    string memory decisionId,
-    string memory actionSummary,
-    string memory rationaleCID,
-    string memory txRef,
-    uint256 totalAmount,
-    uint8 riskScore
-) external returns (bool)
-
-// Update decision status
-function updateDecisionStatus(
-    string memory decisionId,
-    DecisionStatus newStatus,
-    string memory txRef
-) external returns (bool)
-
-// Query decision
-function getDecision(string memory decisionId) 
-    external view returns (Decision memory)
-
-// Get agent statistics
-function getAgentStats(address agent) 
-    external view returns (
-        uint256 totalDecisions,
-        uint256 totalVolume,
-        bool isAuthorized
-    )
-```
-
-#### Deployment
-
+### Phase 2: Contract Deployment (Hours 4-10)
 ```bash
-# Compile
-npx hardhat compile
+# Deploy to Qubic testnet
+cd contract
+./deploy/deploy.sh --network testnet
 
-# Deploy to Arc testnet
-npx hardhat run scripts/deploy.js --network arc-testnet
-
-# Verify
-npx hardhat verify --network arc-testnet DEPLOYED_ADDRESS
+# Test contract functions
+npm test
 ```
 
-[View Contract Source →](./contracts/ArcBotDecisionLogger.sol)
-
----
-
-## 🔐 Security
-
-### Multi-Layer Protection
-
-#### 1. AI-Powered Fraud Detection
-```javascript
-const securityCheck = await securityMonitor.checkTransaction({
-  userId: 'demo-user',
-  recipient: '0x...',
-  amount: 100,
-  timestamp: Date.now()
-});
-
-// Returns: { recommendation: 'APPROVE|WARN|BLOCK', riskScore: 0.45 }
-```
-
-#### 2. Transaction Limits
-- **Single Transaction**: 500 USDC (default)
-- **Daily Volume**: 1,000 USDC (default)
-- **Hourly Rate**: 10 transactions/hour
-
-#### 3. Risk Scoring
-```javascript
-Risk Score = f(
-  amount,
-  velocity,
-  recipient_reputation,
-  user_history,
-  blacklist_check
-)
-
-// 0.0 - 0.3: Low risk (auto-approve)
-// 0.3 - 0.7: Medium risk (warn user)
-// 0.7 - 1.0: High risk (require 2FA)
-```
-
-#### 4. Blacklist Screening
-- Known scam addresses
-- Sanctioned wallets
-- Reported fraud addresses
-- Real-time updates from security partners
-
-#### 5. Velocity Monitoring
-- Tracks transaction frequency
-- Detects unusual patterns
-- Rate limiting per user
-- Automatic cooldown periods
-
-### Best Practices
-
-- 🔑 **Never commit private keys** - Use environment variables
-- 🛡️ **Enable 2FA** - For high-risk transactions
-- 📊 **Monitor alerts** - Review security dashboard regularly
-- 🔄 **Update regularly** - Keep dependencies current
-- 🔐 **Secure Firebase** - Use strict security rules
-
----
-
-## 🌍 Cross-Border Remittances
-
-### Supported Countries
-
-| Country | Currency | Rate (per USDC) | Delivery Time | Methods |
-|---------|----------|-----------------|---------------|---------|
-| 🇰🇪 Kenya | KES | 129 | 5-15 min | M-Pesa, Bank |
-| 🇳🇬 Nigeria | NGN | 1,550 | 30 min - 2hr | Bank, Mobile |
-| 🇿🇦 South Africa | ZAR | 18.5 | 5-15 min | EFT, Bank |
-| 🇬🇭 Ghana | GHS | 15.5 | 5-15 min | Mobile, Bank |
-| 🇺🇬 Uganda | UGX | 3,700 | 5-15 min | Mobile, Bank |
-| 🇹🇿 Tanzania | TZS | 2,500 | 5-15 min | M-Pesa, Bank |
-| 🇷🇼 Rwanda | RWF | 1,350 | 5-15 min | MTN, Bank |
-
-### Fee Comparison
-
-| Service | Fee | Speed | Delivery |
-|---------|-----|-------|----------|
-| **ArcBot AI** | **1.5%** | **5-15 min** | **Direct to wallet** |
-| Western Union | 5-10% | 1-3 days | Cash pickup |
-| MoneyGram | 4-8% | 1-2 days | Cash pickup |
-| Bank Wire | 3-5% | 2-5 days | Bank account |
-
-### Example Usage
-
-```javascript
-// Voice command
-"Arc, send $100 to my mom in Kenya"
-
-// AI Response with remittance request
-REMITTANCE_REQUEST: {
-  "recipientName": "Mom",
-  "country": "Kenya",
-  "phoneNumber": "+254712345678",
-  "amount": 100,
-  "receiveAmount": 12900,
-  "receiveCurrency": "KES",
-  "exchangeRate": 129,
-  "platformFee": 1.00,
-  "networkFee": 0.25,
-  "totalFees": 1.25,
-  "deliveryMethod": "mobile_money"
-}
-
-// Mom receives 12,900 KES in 5-15 minutes
-```
-
----
-
-## 🚀 Deployment
-
-### Frontend (Vercel)
-
+### Phase 3: Backend Integration (Hours 10-28)
 ```bash
-# Install Vercel CLI
-npm i -g vercel
+# Start AI service
+cd backend/ai-verification
+python src/ai_verifier.py
 
-# Deploy
+# Start Oracle agent
+cd ../oracle-agent
+npm run dev
+
+# Test integration
+npm run test:integration
+```
+
+### Phase 4: Frontend Demo (Hours 28-38)
+```bash
+# Build frontend
 cd frontend
-vercel --prod
+npm run build
+
+# Test full flow
+npm run test:e2e
 ```
 
-### Backend (Railway / Render)
-
+### Phase 5: Presentation (Hours 38-48)
 ```bash
-# Railway
-railway login
-railway init
-railway up
+# Run demo scenario
+node scripts/demo-scenario.js
 
-# Or Render
-# Connect GitHub repo at render.com
-# Add environment variables
-# Deploy automatically on push
-```
-
-### Cloudflare Worker
-
-```bash
-cd cloudflare-worker
-wrangler publish
-```
-
-### Firebase Functions
-
-```bash
-firebase deploy --only functions
-```
-
-### Docker Deployment
-
-```dockerfile
-# Dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 4000
-CMD ["node", "server.js"]
-```
-
-```bash
-# Build and run
-docker build -t arcbot-backend .
-docker run -p 4000:4000 --env-file .env arcbot-backend
+# Record video
+# Use OBS Studio or similar
 ```
 
 ---
 
 ## 🧪 Testing
 
-### Run Tests
-
+### Unit Tests
 ```bash
-# Backend tests
-cd backend
-npm test
+# Contract tests
+cd contract && npm test
+
+# AI service tests
+cd backend/ai-verification && pytest
+
+# Oracle tests
+cd backend/oracle-agent && npm test
 
 # Frontend tests
-cd frontend
-npm test
-
-# Smart contract tests
-cd contracts
-npx hardhat test
+cd frontend && npm test
 ```
 
-### Test Coverage
-
+### Integration Tests
 ```bash
-# Generate coverage report
-npm run test:coverage
+# Full system test
+npm run test:integration
+
+# This tests:
+# 1. Contract deployment
+# 2. Fund deposit
+# 3. AI verification
+# 4. Oracle submission
+# 5. Payment release
 ```
 
-### Manual Testing Checklist
+### E2E Tests
+```bash
+cd tests/e2e
+npm run test:e2e
 
-- [ ] Voice recognition works in Chrome/Edge/Safari
-- [ ] Payment execution completes successfully
-- [ ] Scheduled payments trigger on time
-- [ ] AI memory recalls past transactions
-- [ ] Security alerts trigger for high-risk transactions
-- [ ] Cross-border remittances calculate correct fees
-- [ ] Blockchain logging records decisions
-- [ ] TTS audio plays correctly
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow these guidelines:
-
-### Development Workflow
-
-1. **Fork the repository**
-2. **Create a feature branch**
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-3. **Make your changes**
-4. **Write tests**
-5. **Commit with conventional commits**
-   ```bash
-   git commit -m "feat: add amazing feature"
-   ```
-6. **Push to your fork**
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-7. **Open a Pull Request**
-
-### Commit Convention
-
-- `feat:` - New feature
-- `fix:` - Bug fix
-- `docs:` - Documentation changes
-- `style:` - Code style changes
-- `refactor:` - Code refactoring
-- `test:` - Test additions/changes
-- `chore:` - Maintenance tasks
-
-### Code Style
-
-- **ESLint** - JavaScript linting
-- **Prettier** - Code formatting
-- **TypeScript** - Type safety
-- **Solhint** - Solidity linting
+# Tests complete user flows:
+# - Brand creates campaign
+# - Influencer accepts
+# - AI verifies
+# - Payment releases
+```
 
 ---
 
-## 📖 Documentation
+## 📊 Data Flow
 
-- [API Reference](./docs/API.md)
-- [Architecture Guide](./docs/ARCHITECTURE.md)
-- [Smart Contract Documentation](./docs/CONTRACTS.md)
-- [Security Best Practices](./docs/SECURITY.md)
-- [Deployment Guide](./docs/DEPLOYMENT.md)
-- [Troubleshooting](./docs/TROUBLESHOOTING.md)
+```
+┌─────────────────┐
+│  Social Media   │
+│     Post        │
+└────────┬────────┘
+         │
+         ↓ (Scrape/API)
+┌─────────────────┐
+│  Data Fetcher   │
+│   (Python)      │
+└────────┬────────┘
+         │
+         ↓
+┌─────────────────┐
+│ AI Verification │
+│    Service      │
+│  (ai_verifier)  │
+└────────┬────────┘
+         │ (Score 0-100)
+         ↓
+┌─────────────────┐
+│  Oracle Agent   │
+│   (Node.js)     │
+└────────┬────────┘
+         │ (Signed TX)
+         ↓
+┌─────────────────┐
+│ Qubic Network   │
+│ Smart Contract  │
+│   (escrow.qpi)  │
+└────────┬────────┘
+         │ (Zero-Fee)
+         ↓
+┌─────────────────┐
+│   Influencer    │
+│     Wallet      │
+└─────────────────┘
+```
 
 ---
 
-## 🐛 Known Issues
+## 🔑 Key Technologies
 
-- Voice recognition requires HTTPS in production
-- ElevenLabs TTS has rate limits (fallback to browser TTS)
-- Arc testnet occasionally has network congestion
-- Firebase Firestore quota limits on free tier
-
-See [Issues](https://github.com/yourusername/arcbot-ai/issues) for full list.
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Smart Contract | C++ (QPI) | On-chain escrow logic |
+| AI Verification | Python | Fraud detection |
+| Oracle | Node.js/TypeScript | Bridge to blockchain |
+| Frontend | React/TailwindCSS | User interface |
+| Blockchain | Qubic Testnet | Zero-fee transactions |
 
 ---
 
-## 🗺️ Roadmap
+## 📈 Performance Metrics
 
-### Q1 2025
-- [ ] Multi-language support (Spanish, French, Swahili)
-- [ ] Mobile app (React Native)
-- [ ] NFT transfer support
-- [ ] Group payment splitting
+- **Transaction Speed:** < 1 second (Qubic)
+- **Transaction Fee:** 0 QUBIC (Zero fees)
+- **AI Verification:** 2-3 seconds
+- **Oracle Submission:** 1-2 seconds
+- **Total Flow:** ~5-10 seconds end-to-end
 
-### Q2 2025
-- [ ] DeFi integration (swaps, staking)
-- [ ] Mainnet deployment
-- [ ] Advanced analytics dashboard
-- [ ] Invoice generation
+---
 
-### Q3 2025
-- [ ] AI-powered expense categorization
-- [ ] Tax reporting tools
-- [ ] Multi-chain support
-- [ ] Enterprise features
+## 🔒 Security Features
+
+1. **Oracle Authorization:** Only authorized oracle can submit scores
+2. **State Validation:** Smart contract validates all state transitions
+3. **Threshold Enforcement:** 95/100 score required for payment
+4. **Refund Protection:** Brand can reclaim funds if fraud detected
+5. **Immutable Audit Trail:** All transactions on-chain
+
+---
+
+## 🎯 Demo Scenarios
+
+### Scenario 1: Legitimate Campaign (Score: 96/100)
+- Real followers with profile pictures
+- Authentic, contextual comments
+- Normal engagement velocity
+- Geo-alignment with influencer
+- **Result:** ✅ Payment released
+
+### Scenario 2: Bot Fraud (Score: 42/100)
+- Random username patterns
+- Generic/spam comments
+- Suspicious engagement spike
+- Bot farm locations
+- **Result:** ❌ Payment blocked, refund issued
+
+### Scenario 3: Mixed Quality (Score: 78/100)
+- Mix of real and fake engagement
+- Some quality concerns
+- Below 95 threshold
+- **Result:** ⚠️ Manual review suggested
+
+---
+
+## 📝 Environment Setup
+
+### Prerequisites
+- Node.js 18+
+- Python 3.9+
+- Docker & Docker Compose
+- Qubic CLI
+- Git
+
+### Installation Steps
+
+1. **Clone Repository**
+```bash
+git clone https://github.com/your-org/qubic-smart-escrow.git
+cd qubic-smart-escrow
+```
+
+2. **Install Qubic CLI**
+```bash
+npm install -g @qubic-lib/cli
+```
+
+3. **Setup Environment**
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+4. **Install Dependencies**
+```bash
+# Backend AI
+cd backend/ai-verification && pip install -r requirements.txt
+
+# Backend Oracle
+cd ../oracle-agent && npm install
+
+# Frontend
+cd ../../frontend && npm install
+```
+
+5. **Start Services**
+```bash
+# Option 1: Docker
+docker-compose up
+
+# Option 2: Manual
+npm run start:all
+```
+
+---
+
+## 🏆 Hackathon Submission Checklist
+
+- [ ] Smart contract deployed to Qubic testnet
+- [ ] AI verification service running
+- [ ] Oracle agent connected
+- [ ] Frontend demo functional
+- [ ] All 3 test scenarios working
+- [ ] Video demo recorded (< 5 min)
+- [ ] README with setup instructions
+- [ ] GitHub repository public
+- [ ] Live demo URL (optional)
+
+---
+
+## 📞 Support & Resources
+
+- **Qubic Documentation:** https://docs.qubic.org
+- **TypeScript Library:** https://github.com/qubic-lib/ts-library
+- **Discord Community:** https://discord.gg/qubic
+- **Testnet Faucet:** https://testnet.qubic.org/faucet
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-```
-MIT License
-
-Copyright (c) 2025 ArcBot AI Team
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction...
-```
-
-
-## 🙏 Acknowledgments
-
-- [Arc Blockchain](https://arc.io) - Layer 2 infrastructure
-- [Thirdweb](https://thirdweb.com) - Payment rails
-- [Cloudflare](https://cloudflare.com) - AI inference
-- [Firebase](https://firebase.google.com) - Backend services
-- [ElevenLabs](https://elevenlabs.io) - Voice synthesis
-- [OpenAI](https://openai.com) - AI research inspiration
-
-
-
-## ⚠️ Disclaimer
-
-This is experimental software. Use at your own risk. Always verify transactions before confirming. Never share your private keys. Test thoroughly on testnet before using with real funds.
+MIT License - See LICENSE file for details
 
 ---
 
-<div align="center">
+## 🤝 Contributing
 
-**Made with ❤️ by the ArcBot AI Team**
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
 
-[⭐ Star us on GitHub](https://github.com/yourusername/arcbot-ai) • [🐦 Follow on Twitter](https://twitter.com/arcbotai) • [📖 Read the Docs](https://docs.arcbot.ai)
+---
 
-</div>
+**Built with ❤️ for Qubic Hackathon**

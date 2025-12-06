@@ -1,0 +1,315 @@
+{
+  "contract": {
+    "name": "QubicSmartEscrow",
+    "version": "1.0.0",
+    "description": "AI-verified influencer marketing escrow system",
+    "sourceFile": "src/escrow.qpi",
+    "language": "C++/QPI"
+  },
+  
+  "networks": {
+    "testnet": {
+      "rpcEndpoint": "https://testnet-rpc.qubic.org/",
+      "networkId": 1,
+      "chainId": "testnet",
+      "gasPrice": 0,
+      "confirmations": 3,
+      "blockTime": 1000,
+      "faucetUrl": "https://testnet.qubic.org/faucet"
+    },
+    "mainnet": {
+      "rpcEndpoint": "https://rpc.qubic.org/",
+      "networkId": 0,
+      "chainId": "mainnet",
+      "gasPrice": 0,
+      "confirmations": 10,
+      "blockTime": 1000,
+      "explorerUrl": "https://explorer.qubic.org"
+    }
+  },
+  
+  "deployment": {
+    "deployer": {
+      "publicKey": "${DEPLOYER_PUBLIC_KEY}",
+      "privateKey": "${DEPLOYER_PRIVATE_KEY}",
+      "requiresBalance": false
+    },
+    "ipo": {
+      "enabled": true,
+      "duration": 100,
+      "minParticipants": 1,
+      "sharePrice": 0
+    },
+    "initialization": {
+      "autoSetOracle": false,
+      "oracleId": "${ORACLE_PUBLIC_KEY}",
+      "requiredScore": 95,
+      "platformFeePercent": 3
+    }
+  },
+  
+  "procedures": [
+    {
+      "name": "setOracleId",
+      "index": 0,
+      "description": "Authorize oracle (one-time)",
+      "inputs": [
+        {
+          "name": "oracleId",
+          "type": "id",
+          "required": true
+        }
+      ],
+      "authorization": "owner",
+      "gasEstimate": 0
+    },
+    {
+      "name": "depositFunds",
+      "index": 1,
+      "description": "Lock payment in escrow",
+      "inputs": [
+        {
+          "name": "amount",
+          "type": "sint64",
+          "required": true,
+          "validation": "amount > 0"
+        },
+        {
+          "name": "influencerId",
+          "type": "id",
+          "required": true
+        },
+        {
+          "name": "retentionDays",
+          "type": "uint32",
+          "required": true,
+          "validation": "retentionDays >= 7"
+        }
+      ],
+      "authorization": "any",
+      "gasEstimate": 0,
+      "requiresTransfer": true
+    },
+    {
+      "name": "setVerificationScore",
+      "index": 2,
+      "description": "Submit AI verification score",
+      "inputs": [
+        {
+          "name": "score",
+          "type": "uint8",
+          "required": true,
+          "validation": "score >= 0 && score <= 100"
+        }
+      ],
+      "authorization": "oracle",
+      "gasEstimate": 0
+    },
+    {
+      "name": "releasePayment",
+      "index": 3,
+      "description": "Release funds to influencer",
+      "inputs": [],
+      "authorization": "any",
+      "gasEstimate": 0,
+      "conditions": [
+        "verificationScore >= requiredScore",
+        "currentTick >= retentionEndTick"
+      ]
+    },
+    {
+      "name": "refundFunds",
+      "index": 4,
+      "description": "Refund to brand if fraud detected",
+      "inputs": [],
+      "authorization": "any",
+      "gasEstimate": 0,
+      "conditions": [
+        "verificationScore < requiredScore"
+      ]
+    }
+  ],
+  
+  "constants": {
+    "DEFAULT_REQUIRED_SCORE": 95,
+    "PLATFORM_FEE_PERCENT": 3,
+    "MIN_RETENTION_TICKS": 100800,
+    "TICKS_PER_DAY": 14400
+  },
+  
+  "stateStructure": {
+    "brandId": {
+      "type": "id",
+      "size": 60,
+      "description": "Brand wallet address"
+    },
+    "influencerId": {
+      "type": "id",
+      "size": 60,
+      "description": "Influencer wallet address"
+    },
+    "oracleId": {
+      "type": "id",
+      "size": 60,
+      "description": "Authorized oracle address"
+    },
+    "escrowBalance": {
+      "type": "sint64",
+      "size": 8,
+      "description": "Locked payment amount"
+    },
+    "platformFee": {
+      "type": "sint64",
+      "size": 8,
+      "description": "Platform fee (3%)"
+    },
+    "requiredScore": {
+      "type": "uint8",
+      "size": 1,
+      "description": "Minimum passing score"
+    },
+    "verificationScore": {
+      "type": "uint8",
+      "size": 1,
+      "description": "AI verification result (0-100)"
+    },
+    "retentionEndTick": {
+      "type": "uint32",
+      "size": 4,
+      "description": "When retention period ends"
+    },
+    "depositTick": {
+      "type": "uint32",
+      "size": 4,
+      "description": "When funds deposited"
+    },
+    "isActive": {
+      "type": "bool",
+      "size": 1,
+      "description": "Contract is active"
+    },
+    "isVerified": {
+      "type": "bool",
+      "size": 1,
+      "description": "Score has been submitted"
+    },
+    "isPaid": {
+      "type": "bool",
+      "size": 1,
+      "description": "Payment released"
+    },
+    "isRefunded": {
+      "type": "bool",
+      "size": 1,
+      "description": "Funds refunded"
+    },
+    "oracleSet": {
+      "type": "bool",
+      "size": 1,
+      "description": "Oracle authorized"
+    }
+  },
+  
+  "events": [
+    {
+      "name": "OracleAuthorized",
+      "fields": ["oracleId"],
+      "description": "Oracle has been set"
+    },
+    {
+      "name": "FundsDeposited",
+      "fields": ["brandId", "amount", "influencerId", "retentionEndTick"],
+      "description": "Brand deposited funds"
+    },
+    {
+      "name": "ScoreSubmitted",
+      "fields": ["score", "verifiedBy"],
+      "description": "AI score submitted by oracle"
+    },
+    {
+      "name": "PaymentReleased",
+      "fields": ["influencerId", "amount"],
+      "description": "Payment sent to influencer"
+    },
+    {
+      "name": "FundsRefunded",
+      "fields": ["brandId", "amount", "reason"],
+      "description": "Funds returned to brand"
+    }
+  ],
+  
+  "security": {
+    "audited": false,
+    "auditDate": null,
+    "auditReport": null,
+    "knownIssues": [],
+    "recommendations": [
+      "Set oracle immediately after deployment",
+      "Test on testnet before mainnet deployment",
+      "Monitor oracle for availability",
+      "Implement frontend balance checks before deposits"
+    ]
+  },
+  
+  "testing": {
+    "testSuites": [
+      "test/escrow.test.cpp"
+    ],
+    "coverage": 95,
+    "scenarios": [
+      {
+        "name": "Legitimate Campaign",
+        "score": 96,
+        "expectedOutcome": "payment_released"
+      },
+      {
+        "name": "Bot Fraud",
+        "score": 42,
+        "expectedOutcome": "funds_refunded"
+      },
+      {
+        "name": "Mixed Quality",
+        "score": 78,
+        "expectedOutcome": "funds_refunded"
+      }
+    ]
+  },
+  
+  "integration": {
+    "backend": {
+      "aiService": "http://localhost:5000",
+      "oracleAgent": "http://localhost:8080"
+    },
+    "frontend": {
+      "dashboardUrl": "http://localhost:3000",
+      "walletConnection": "required"
+    }
+  },
+  
+  "monitoring": {
+    "metrics": [
+      "total_deposits",
+      "successful_payments",
+      "fraud_refunds",
+      "average_score",
+      "total_volume"
+    ],
+    "alerts": [
+      {
+        "condition": "oracle_downtime > 1_hour",
+        "action": "notify_admin"
+      },
+      {
+        "condition": "refund_rate > 30%",
+        "action": "investigate_fraud_pattern"
+      }
+    ]
+  },
+  
+  "documentation": {
+    "readme": "README.md",
+    "api": "../docs/API.md",
+    "architecture": "../docs/ARCHITECTURE.md",
+    "deployment": "../docs/DEPLOYMENT.md"
+  }
+}
