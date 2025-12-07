@@ -1,12 +1,12 @@
 /**
- * API Service - Backend Integration
+ * API Service - Real Backend Integration
  * Connects frontend to AI Verification Service and Oracle Agent
  */
 
 const CONFIG = {
   AI_SERVICE_URL: process.env.REACT_APP_AI_SERVICE_URL || 'http://localhost:5000',
   ORACLE_URL: process.env.REACT_APP_ORACLE_URL || 'http://localhost:8080',
-  TIMEOUT: 30000
+  TIMEOUT: 100000
 };
 
 export interface VerificationResult {
@@ -33,8 +33,13 @@ export interface ScoreDetail {
 
 export interface OracleSubmitResult {
   success: boolean;
-  txId?: string;
+  transactionId?: string;
+  targetTick?: number;
   score?: number;
+  recommendation?: string;
+  confidence?: string;
+  aiResult?: any;
+  transaction?: any;
   error?: string;
 }
 
@@ -44,20 +49,23 @@ class ApiService {
    */
   static async verifyPost(postUrl: string, scenario: string): Promise<VerificationResult> {
     try {
+      console.log('[API Service] Requesting AI verification...');
+      
       const response = await fetch(`${CONFIG.AI_SERVICE_URL}/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          post_url: postUrl,
+          post_url: postUrl,  // Python expects snake_case
           scenario: scenario
         }),
         signal: AbortSignal.timeout(CONFIG.TIMEOUT)
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -66,18 +74,21 @@ class ApiService {
       
     } catch (error) {
       console.error('[API Service] AI Verification failed:', error);
-      
-      // Fallback to mock data if service is unavailable
-      console.warn('[API Service] Using mock data as fallback');
-      return this.getMockVerification(scenario);
+      throw new Error(
+        error instanceof Error 
+          ? error.message 
+          : 'Failed to connect to AI Service. Please ensure the backend is running.'
+      );
     }
   }
 
   /**
-   * Submit verification result to Oracle Agent
+   * Submit verification result to Oracle Agent and broadcast to blockchain
    */
   static async submitToOracle(postUrl: string, scenario: string): Promise<OracleSubmitResult> {
     try {
+      console.log('[API Service] Submitting to Oracle Agent...');
+      
       const response = await fetch(`${CONFIG.ORACLE_URL}/verify`, {
         method: 'POST',
         headers: {
@@ -91,20 +102,40 @@ class ApiService {
       });
 
       if (!response.ok) {
-        throw new Error(`Oracle HTTP ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Oracle HTTP ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('[API Service] Oracle submission successful');
+      console.log('[API Service] Oracle submission successful:', data.transactionId);
       return data;
       
     } catch (error) {
-      console.warn('[API Service] Oracle submission failed:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
+      console.error('[API Service] Oracle submission failed:', error);
+      throw new Error(
+        error instanceof Error 
+          ? error.message 
+          : 'Failed to connect to Oracle Agent. Please ensure the backend is running.'
+      );
     }
+  }
+
+  /**
+   * Combined workflow: AI verification + Oracle submission
+   */
+  static async verifyAndSubmit(postUrl: string, scenario: string): Promise<{
+    verification: VerificationResult;
+    oracle: OracleSubmitResult;
+  }> {
+    console.log('[API Service] Starting complete verification workflow...');
+    
+    // Step 1: Get AI verification
+    const verification = await this.verifyPost(postUrl, scenario);
+    
+    // Step 2: Submit to Oracle and broadcast to blockchain
+    const oracle = await this.submitToOracle(postUrl, scenario);
+    
+    return { verification, oracle };
   }
 
   /**
@@ -132,6 +163,32 @@ class ApiService {
       return response.ok;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Get Oracle state
+   */
+  static async getOracleState(): Promise<any> {
+    try {
+      const response = await fetch(`${CONFIG.ORACLE_URL}/state`);
+      return await response.json();
+    } catch (error) {
+      console.error('[API Service] Failed to get oracle state:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get network information
+   */
+  static async getNetworkInfo(): Promise<any> {
+    try {
+      const response = await fetch(`${CONFIG.ORACLE_URL}/network`);
+      return await response.json();
+    } catch (error) {
+      console.error('[API Service] Failed to get network info:', error);
+      return null;
     }
   }
 
@@ -176,108 +233,37 @@ class ApiService {
   }
 
   /**
-   * Mock verification data (fallback when services are offline)
+   * Get balance for an address
    */
-  private static getMockVerification(scenario: string): VerificationResult {
-    const scenarios: Record<string, VerificationResult> = {
-      legitimate: {
-        overall_score: 96,
-        passed: true,
-        recommendation: 'APPROVED_FOR_PAYMENT',
-        confidence: 'HIGH',
-        breakdown: {
-          follower_authenticity: {
-            score: 98,
-            weight: 0.30,
-            weighted_contribution: 29.4
-          },
-          engagement_quality: {
-            score: 95,
-            weight: 0.35,
-            weighted_contribution: 33.25
-          },
-          velocity_check: {
-            score: 94,
-            weight: 0.20,
-            weighted_contribution: 18.8
-          },
-          geo_alignment: {
-            score: 97,
-            weight: 0.15,
-            weighted_contribution: 14.55
-          }
-        },
-        fraud_flags: [],
-        summary: 'Excellent authenticity score. Campaign shows genuine followers with authentic interactions. All metrics within expected ranges.'
-      },
-      bot_fraud: {
-        overall_score: 42,
-        passed: false,
-        recommendation: 'REJECT_PAYMENT_FRAUD_DETECTED',
-        confidence: 'HIGH',
-        breakdown: {
-          follower_authenticity: {
-            score: 35,
-            weight: 0.30,
-            weighted_contribution: 10.5
-          },
-          engagement_quality: {
-            score: 45,
-            weight: 0.35,
-            weighted_contribution: 15.75
-          },
-          velocity_check: {
-            score: 40,
-            weight: 0.20,
-            weighted_contribution: 8.0
-          },
-          geo_alignment: {
-            score: 48,
-            weight: 0.15,
-            weighted_contribution: 7.2
-          }
-        },
-        fraud_flags: [
-          'FAKE_FOLLOWERS_DETECTED',
-          'INAUTHENTIC_ENGAGEMENT',
-          'SUSPICIOUS_ENGAGEMENT_SPIKE',
-          'GEO_LOCATION_MISMATCH'
-        ],
-        summary: 'Low authenticity score. Strong indicators of fraud: bot followers, spam comments, and suspicious engagement patterns. Payment should be blocked and refunded to brand.'
-      },
-      mixed_quality: {
-        overall_score: 78,
-        passed: false,
-        recommendation: 'MANUAL_REVIEW_RECOMMENDED',
-        confidence: 'MEDIUM',
-        breakdown: {
-          follower_authenticity: {
-            score: 75,
-            weight: 0.30,
-            weighted_contribution: 22.5
-          },
-          engagement_quality: {
-            score: 80,
-            weight: 0.35,
-            weighted_contribution: 28.0
-          },
-          velocity_check: {
-            score: 82,
-            weight: 0.20,
-            weighted_contribution: 16.4
-          },
-          geo_alignment: {
-            score: 76,
-            weight: 0.15,
-            weighted_contribution: 11.4
-          }
-        },
-        fraud_flags: ['SUSPICIOUS_ENGAGEMENT_SPIKE'],
-        summary: 'Good authenticity score but below 95 threshold. Some quality concerns detected. Mix of real and potentially fake engagement. Manual review recommended before payment release.'
-      }
-    };
+  static async getBalance(address: string): Promise<number> {
+    try {
+      const response = await fetch(`${CONFIG.ORACLE_URL}/balance/${address}`);
+      const data = await response.json();
+      return data.balance || 0;
+    } catch (error) {
+      console.error('[API Service] Failed to get balance:', error);
+      return 0;
+    }
+  }
 
-    return scenarios[scenario] || scenarios.legitimate;
+  /**
+   * Check if services are available
+   */
+  static async checkServicesAvailable(): Promise<{
+    ai: boolean;
+    oracle: boolean;
+    bothOnline: boolean;
+  }> {
+    const [ai, oracle] = await Promise.all([
+      this.healthCheckAI(),
+      this.healthCheckOracle()
+    ]);
+
+    return {
+      ai,
+      oracle,
+      bothOnline: ai && oracle
+    };
   }
 }
 

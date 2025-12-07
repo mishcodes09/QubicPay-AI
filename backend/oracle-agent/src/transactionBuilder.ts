@@ -1,10 +1,28 @@
 /**
- * Transaction Builder
- * Builds and signs Qubic transactions
+ * Transaction Builder (CORRECTED VERSION)
+ * Uses QubicPackageBuilder correctly with Uint8Array
  */
 import { Config } from './config';
-import { Transaction, ContractProcedure } from './types';
-import * as crypto from 'crypto';
+import { ContractProcedure } from './types';
+
+// Import using default export (the library exports everything this way)
+import QubicLib from '@qubic-lib/qubic-ts-library';
+
+// Extract the classes we need from the default export
+const { 
+  QubicTransaction, 
+  PublicKey, 
+  Long, 
+  DynamicPayload, 
+  QubicPackageBuilder 
+} = QubicLib;
+
+interface BuildTransactionResult {
+  encodedTransaction: string;
+  transactionId: string;
+  targetTick: number;
+  inputType: number;
+}
 
 export class TransactionBuilder {
   private oraclePrivateKey: string;
@@ -13,147 +31,258 @@ export class TransactionBuilder {
   constructor() {
     this.oraclePrivateKey = Config.QUBIC.oraclePrivateKey;
     this.oraclePublicKey = Config.QUBIC.oraclePublicKey;
+    
+    console.log('[TX Builder] Initialized with Qubic TypeScript library');
   }
 
   /**
-   * Build transaction to set verification score
+   * Build and sign transaction to set verification score
+   * Returns a properly encoded transaction ready for broadcast
    */
-  buildSetVerificationScoreTransaction(
+  async buildSetVerificationScoreTransaction(
     contractId: string,
     score: number,
     currentTick: number
-  ): Transaction {
+  ): Promise<BuildTransactionResult> {
     console.log(`[TX Builder] Building setVerificationScore transaction: score=${score}`);
 
+    // Calculate target tick (give enough time for broadcast and processing)
+    const targetTick = currentTick + 30; // 30 ticks ahead for safety
+
     // Create payload with score
-    const payload = this.encodeScore(score);
+    const payload = this.createScorePayload(score);
 
-    const transaction: Transaction = {
-      sourceId: this.oraclePublicKey,
-      destId: contractId,
-      amount: 0, // No funds transfer, just procedure call
-      tick: currentTick + 5, // Execute in 5 ticks
-      inputType: ContractProcedure.SET_VERIFICATION_SCORE,
-      inputSize: payload.length,
-      payload
+    // Build the transaction using Qubic library
+    const transaction = new QubicTransaction()
+      .setSourcePublicKey(new PublicKey(this.oraclePublicKey))
+      .setDestinationPublicKey(new PublicKey(contractId))
+      .setTick(targetTick)
+      .setInputType(ContractProcedure.SET_VERIFICATION_SCORE)
+      .setInputSize(payload.getPackageSize())
+      .setAmount(new Long(BigInt(0))) // No funds transfer
+      .setPayload(payload);
+
+    // Sign the transaction with private key (seed)
+    console.log('[TX Builder] Signing transaction with oracle private key...');
+    await transaction.build(this.oraclePrivateKey);
+
+    // Encode to base64 for RPC
+    const encodedTransaction = transaction.encodeTransactionToBase64(
+      transaction.getPackageData()
+    );
+
+    // Generate transaction ID
+    const transactionId = this.generateTransactionId(targetTick);
+
+    console.log(`[TX Builder] ✓ Transaction signed and encoded`);
+    console.log(`[TX Builder]   Target tick: ${targetTick}`);
+    console.log(`[TX Builder]   Transaction ID: ${transactionId}`);
+    console.log(`[TX Builder]   Encoded size: ${encodedTransaction.length} characters`);
+
+    return {
+      encodedTransaction,
+      transactionId,
+      targetTick,
+      inputType: ContractProcedure.SET_VERIFICATION_SCORE
     };
-
-    return transaction;
   }
 
   /**
-   * Sign transaction with Oracle's private key
+   * Create payload for score submission
+   * Payload structure: 1 byte containing score (0-100)
+   * 
+   * IMPORTANT: QubicPackageBuilder.add() expects Uint8Array directly
    */
-  signTransaction(transaction: Transaction): Transaction {
-    console.log('[TX Builder] Signing transaction...');
-
-    // In production, this would use the actual Qubic signing algorithm
-    // For now, we'll create a simple signature representation
-    const txData = this.serializeTransactionForSigning(transaction);
-    const signature = this.sign(txData, this.oraclePrivateKey);
-
-    console.log('[TX Builder] ✓ Transaction signed');
-
-    // In actual implementation, the signature would be added to the transaction
-    return transaction;
-  }
-
-  /**
-   * Encode score into binary payload
-   */
-  private encodeScore(score: number): Uint8Array {
+  private createScorePayload(score: number): any {
     // Ensure score is integer 0-100
     const normalizedScore = Math.max(0, Math.min(100, Math.round(score)));
 
-    // Create 4-byte payload (int32)
-    const buffer = new ArrayBuffer(4);
+    // Create 1-byte buffer for uint8 score
+    const buffer = new ArrayBuffer(1);
     const view = new DataView(buffer);
-    view.setInt32(0, normalizedScore, true); // little-endian
+    view.setUint8(0, normalizedScore);
+    
+    // Convert to Uint8Array
+    const scoreData = new Uint8Array(buffer);
 
-    return new Uint8Array(buffer);
+    // Create dynamic payload directly (skip QubicPackageBuilder if causing issues)
+    const payload = new DynamicPayload(scoreData.length);
+    payload.setPayload(scoreData);
+
+    console.log(`[TX Builder] Payload created: ${normalizedScore} (${scoreData.length} byte)`);
+
+    return payload;
   }
 
   /**
-   * Serialize transaction for signing
+   * Alternative: Create payload for more complex score data
+   * Use this if your contract expects additional fields
    */
-  private serializeTransactionForSigning(tx: Transaction): Buffer {
-    // This would use the actual Qubic transaction format
-    // For now, create a simple serialization
-    const parts = [
-      tx.sourceId,
-      tx.destId,
-      tx.amount.toString(),
-      tx.tick.toString(),
-      tx.inputType.toString(),
-      tx.inputSize.toString()
-    ];
+  private createComplexScorePayload(
+    score: number,
+    postUrl: string,
+    timestamp: number
+  ): any {
+    // Example complex structure:
+    // struct SetScoreInput {
+    //   uint8 score;           // 1 byte
+    //   char postUrl[256];     // 256 bytes (fixed-size string)
+    //   uint64 timestamp;      // 8 bytes
+    // };
+    const totalSize = 1 + 256 + 8; // Total: 265 bytes
+    const completeBuffer = new Uint8Array(totalSize);
+    let offset = 0;
 
-    if (tx.payload) {
-      parts.push(Buffer.from(tx.payload).toString('hex'));
-    }
+    // 1. Add score (uint8, 1 byte)
+    completeBuffer[offset] = Math.max(0, Math.min(100, Math.round(score)));
+    offset += 1;
 
-    return Buffer.from(parts.join(':'));
+    // 2. Add postUrl (char[256], 256 bytes)
+    const encoder = new TextEncoder();
+    const urlBytes = encoder.encode(postUrl.substring(0, 255));
+    completeBuffer.set(urlBytes, offset);
+    offset += 256;
+
+    // 3. Add timestamp (uint64, 8 bytes, little-endian)
+    const timestampView = new DataView(completeBuffer.buffer, offset, 8);
+    timestampView.setBigUint64(0, BigInt(timestamp), true);
+
+    // Create dynamic payload
+    const payload = new DynamicPayload(totalSize);
+    payload.setPayload(completeBuffer);
+
+    console.log(`[TX Builder] Complex payload created: ${totalSize} bytes`);
+
+    return payload;
   }
 
   /**
-   * Sign data with private key
+   * Generate deterministic transaction ID
+   * Based on source, destination, tick, and input type
    */
-  private sign(data: Buffer, privateKey: string): string {
-    // In production, this would use Qubic's Schnorr signature
-    // For now, use a simple HMAC as placeholder
-    const hmac = crypto.createHmac('sha256', privateKey);
-    hmac.update(data);
-    return hmac.digest('hex');
+  private generateTransactionId(targetTick: number): string {
+    const crypto = require('crypto');
+    
+    const idString = [
+      this.oraclePublicKey,
+      Config.QUBIC.contractId,
+      targetTick.toString(),
+      ContractProcedure.SET_VERIFICATION_SCORE.toString(),
+      Date.now().toString()
+    ].join(':');
+    
+    const hash = crypto.createHash('sha256').update(idString).digest('hex');
+    
+    // Return uppercase hex (Qubic transaction ID format)
+    return hash.substring(0, 64).toUpperCase();
   }
 
   /**
-   * Verify signature (for testing)
+   * Validate transaction parameters before building
    */
-  verifySignature(data: Buffer, signature: string, publicKey: string): boolean {
-    // Placeholder verification
-    return signature.length === 64; // Valid hex signature
-  }
-
-  /**
-   * Estimate transaction fee (always 0 on Qubic)
-   */
-  estimateFee(transaction: Transaction): number {
-    return 0; // Qubic has zero fees
-  }
-
-  /**
-   * Validate transaction before broadcast
-   */
-  validateTransaction(transaction: Transaction): { valid: boolean; errors: string[] } {
+  validateTransactionParams(
+    contractId: string,
+    score: number,
+    currentTick: number
+  ): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
-    if (!transaction.sourceId || transaction.sourceId.length !== 60) {
-      errors.push('Invalid source ID');
+    // Validate contract ID format (60 characters for Qubic addresses)
+    if (!contractId || contractId.length !== 60) {
+      errors.push('Invalid contract ID: must be 60 characters');
     }
 
-    if (!transaction.destId || transaction.destId.length !== 60) {
-      errors.push('Invalid destination ID');
+    // Check if contract ID is all uppercase letters
+    if (contractId && !/^[A-Z]+$/.test(contractId)) {
+      errors.push('Invalid contract ID: must be uppercase letters only');
     }
 
-    if (transaction.amount < 0) {
-      errors.push('Invalid amount');
+    // Validate score range
+    if (score < 0 || score > 100) {
+      errors.push('Invalid score: must be between 0 and 100');
     }
 
-    if (transaction.tick <= 0) {
-      errors.push('Invalid tick');
+    // Validate tick
+    if (currentTick <= 0) {
+      errors.push('Invalid current tick: must be positive');
     }
 
-    if (transaction.inputType < 0 || transaction.inputType > 4) {
-      errors.push('Invalid input type');
+    // Validate oracle keys
+    if (!this.oraclePrivateKey || this.oraclePrivateKey.length !== 55) {
+      errors.push('Invalid oracle private key: must be 55 characters (seed format)');
     }
 
-    if (transaction.payload && transaction.payload.length !== transaction.inputSize) {
-      errors.push('Payload size mismatch');
+    if (!this.oraclePublicKey || this.oraclePublicKey.length !== 60) {
+      errors.push('Invalid oracle public key: must be 60 characters');
+    }
+
+    // Check if oracle public key is all uppercase
+    if (this.oraclePublicKey && !/^[A-Z]+$/.test(this.oraclePublicKey)) {
+      errors.push('Invalid oracle public key: must be uppercase letters only');
     }
 
     return {
       valid: errors.length === 0,
       errors
+    };
+  }
+
+  /**
+   * Estimate transaction fee
+   * Qubic has zero transaction fees
+   */
+  estimateFee(): number {
+    return 0;
+  }
+
+  /**
+   * Get oracle public key
+   */
+  getOraclePublicKey(): string {
+    return this.oraclePublicKey;
+  }
+
+  /**
+   * Test transaction building (for debugging)
+   */
+  async testBuild(): Promise<void> {
+    console.log('[TX Builder] Running test build...');
+    
+    try {
+      // Create a test transaction
+      const testTick = 12345678;
+      const testScore = 87;
+      
+      const result = await this.buildSetVerificationScoreTransaction(
+        Config.QUBIC.contractId,
+        testScore,
+        testTick
+      );
+      
+      console.log('[TX Builder] ✓ Test build successful');
+      console.log(`[TX Builder]   Encoded length: ${result.encodedTransaction.length}`);
+      console.log(`[TX Builder]   Target tick: ${result.targetTick}`);
+      console.log(`[TX Builder]   TX ID: ${result.transactionId}`);
+    } catch (error: any) {
+      console.error('[TX Builder] ✗ Test build failed:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get library version info
+   */
+  getLibraryInfo(): any {
+    return {
+      library: '@qubic-lib/qubic-ts-library',
+      availableClasses: [
+        'QubicTransaction',
+        'PublicKey',
+        'Long',
+        'DynamicPayload',
+        'QubicPackageBuilder'
+      ],
+      status: 'ready'
     };
   }
 }

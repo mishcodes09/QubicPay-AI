@@ -1,277 +1,443 @@
 /**
- * Qubic Network Client (FIXED - Graceful Degradation)
- * Handles blockchain interactions with fallback for unavailable RPC
+ * Qubic Network Client (REAL RPC IMPLEMENTATION - FIXED)
+ * Uses official Qubic RPC endpoints and proper transaction encoding
  */
 import axios from 'axios';
 import { Config } from './config';
-import { Transaction, TransactionStatus, EscrowContract } from './types';
+import { TransactionStatus, EscrowContract } from './types';
+
+interface TickInfo {
+  tick: number;
+  timestamp: number;
+  epoch: number;
+}
+
+interface Balance {
+  id: string;
+  balance: string;
+  validForTick: number;
+  latestIncomingTransferTick: number;
+  latestOutgoingTransferTick: number;
+  incomingAmount: string;
+  outgoingAmount: string;
+  numberOfIncomingTransfers: number;
+  numberOfOutgoingTransfers: number;
+}
+
+interface BroadcastResponse {
+  peersBroadcasted: number;
+  encodedTransaction: string;
+  transactionId?: string;
+}
+
+interface NetworkStatus {
+  lastProcessedTick: {
+    tick: number;
+    epoch: number;
+  };
+  lastProcessedTicksPerEpoch: any;
+  skippedTicks: any[];
+  processedTickIntervalsPerEpoch: any;
+  numberOfEntities: number;
+  numberOfTransactions: number;
+  timestamp: string;
+}
 
 export class QubicClient {
   private rpcClient: any;
   private contractId: string;
-  private useMockMode: boolean = false;
+  private connected: boolean = false; // FIXED: Renamed from isConnected
 
   constructor() {
     this.rpcClient = axios.create({
       baseURL: Config.QUBIC.rpcEndpoint,
-      timeout: 10000, // Reduced timeout
+      timeout: 15000,
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       }
     });
     this.contractId = Config.QUBIC.contractId;
   }
 
   /**
-   * Get current network tick (with fallback)
+   * Get current network tick (REAL)
+   * Uses /v1/tick-info endpoint
    */
   async getCurrentTick(): Promise<number> {
     try {
-      const response = await this.rpcClient.get('/tick');
-      const data: any = response.data;
+      const response = await this.rpcClient.get('/v1/tick-info');
+      const data = response.data;
       
-      if (data && data.tick) {
-        this.useMockMode = false;
-        return data.tick;
+      if (data?.tickInfo?.tick) {
+        this.connected = true;
+        console.log(`[Qubic Client] Current tick: ${data.tickInfo.tick}`);
+        return data.tickInfo.tick;
       }
       
-      // Fallback to estimated tick
-      return this.getEstimatedTick();
+      throw new Error('Invalid tick response from RPC');
     } catch (error: any) {
-      console.warn('[Qubic Client] RPC unavailable, using estimated tick');
-      this.useMockMode = true;
-      return this.getEstimatedTick();
+      this.connected = false;
+      
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        throw new Error('Cannot connect to Qubic RPC. Please check network connection.');
+      }
+      
+      throw new Error(`Failed to get current tick: ${error.message}`);
     }
   }
 
   /**
-   * Get estimated tick (fallback)
+   * Get detailed tick information
    */
-  private getEstimatedTick(): number {
-    // Qubic: ~1 tick per second
-    const QUBIC_EPOCH = 1577836800; // Jan 1, 2020
-    const currentTime = Math.floor(Date.now() / 1000);
-    return currentTime - QUBIC_EPOCH;
+  async getTickInfo(): Promise<TickInfo> {
+    try {
+      const response = await this.rpcClient.get('/v1/tick-info');
+      return {
+        tick: response.data.tickInfo.tick,
+        timestamp: response.data.tickInfo.timestamp,
+        epoch: response.data.tickInfo.epoch
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get tick info: ${error.message}`);
+    }
   }
 
   /**
-   * Query contract state (with fallback)
+   * Get network status
    */
-  async getContractState(contractId: string): Promise<EscrowContract | null> {
-    if (this.useMockMode) {
-      return this.getMockContractState(contractId);
+  async getNetworkStatus(): Promise<NetworkStatus> {
+    try {
+      const response = await this.rpcClient.get('/v1/status');
+      return response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to get network status: ${error.message}`);
+    }
+  }
+
+  /**
+   * Query contract state (REAL)
+   * Uses /v1/querySmartContract endpoint
+   */
+  async querySmartContract(
+    contractIndex: number,
+    inputType: number,
+    requestData: string
+  ): Promise<any> {
+    try {
+      const requestDataSize = requestData ? Buffer.from(requestData, 'base64').length : 0;
+      
+      const response = await this.rpcClient.post('/v1/querySmartContract', {
+        contractIndex,
+        inputType,
+        inputSize: requestDataSize,
+        requestData: requestData || ''
+      });
+
+      if (response.data?.responseData) {
+        // Return the base64 encoded response
+        return response.data;
+      }
+
+      return null;
+    } catch (error: any) {
+      console.error('[Qubic Client] Failed to query contract:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get contract state by querying with empty payload
+   */
+  async getContractState(contractIndex: number): Promise<EscrowContract | null> {
+    try {
+      const response = await this.querySmartContract(contractIndex, 0, '');
+      
+      if (response?.responseData) {
+        // Decode base64 response
+        const stateData = Buffer.from(response.responseData, 'base64');
+        return this.parseContractState(stateData);
+      }
+
+      return null;
+    } catch (error: any) {
+      console.error('[Qubic Client] Failed to get contract state:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get account balance (REAL)
+   * Uses /v1/balances/{identityId} endpoint
+   */
+  async getBalance(address: string): Promise<number> {
+    try {
+      const response = await this.rpcClient.get(`/v1/balances/${address}`);
+      const balance: Balance = response.data.balance;
+      
+      // Convert balance string to number (balance is in QU)
+      return parseInt(balance.balance, 10);
+    } catch (error: any) {
+      console.error('[Qubic Client] Failed to get balance:', error.message);
+      return 0;
+    }
+  }
+
+  /**
+   * Broadcast transaction (REAL)
+   * Uses /v1/broadcast-transaction endpoint
+   * 
+   * IMPORTANT: Expects a base64-encoded, signed transaction string
+   */
+  async broadcastTransaction(encodedTransaction: string): Promise<string> {
+    if (!this.connected) {
+      throw new Error('Not connected to Qubic RPC');
     }
 
     try {
-      const response = await this.rpcClient.post('/queryContractState', {
-        contractId
-      });
-
-      const data: any = response.data;
-      if (data && data.state) {
-        return this.parseContractState(data.state);
-      }
-
-      return this.getMockContractState(contractId);
-    } catch (error: any) {
-      console.warn('[Qubic Client] Failed to query contract, using mock state');
-      return this.getMockContractState(contractId);
-    }
-  }
-
-  /**
-   * Mock contract state for demo
-   */
-  private getMockContractState(contractId: string): EscrowContract {
-    return {
-      contractId,
-      brandId: '',
-      influencerId: '',
-      escrowBalance: 0,
-      requiredScore: 95,
-      verificationScore: 0,
-      retentionEndTick: 0,
-      isActive: false
-    };
-  }
-
-  /**
-   * Broadcast transaction (with mock fallback)
-   */
-  async broadcastTransaction(transaction: Transaction): Promise<string> {
-    if (this.useMockMode) {
-      const mockTxId = this.generateMockTxId();
-      console.log(`[Qubic Client] ✓ Mock transaction created: ${mockTxId}`);
-      return mockTxId;
-    }
-
-    try {
-      console.log('[Qubic Client] Broadcasting transaction...');
+      console.log('[Qubic Client] Broadcasting transaction to network...');
       
-      const response = await this.rpcClient.post('/broadcast', {
-        transaction: this.serializeTransaction(transaction)
+      const response = await this.rpcClient.post('/v1/broadcast-transaction', {
+        encodedTransaction
       });
 
-      const data: any = response.data;
-      const txId = data.txId || this.generateMockTxId();
-      console.log(`[Qubic Client] ✓ Transaction broadcasted: ${txId}`);
+      const data: BroadcastResponse = response.data;
+      
+      console.log(`[Qubic Client] ✓ Transaction broadcasted to ${data.peersBroadcasted} peers`);
+      
+      // Extract transaction ID if available
+      const txId = data.transactionId || this.extractTxIdFromEncoded(encodedTransaction);
       
       return txId;
     } catch (error: any) {
-      console.warn('[Qubic Client] Broadcast failed, using mock transaction');
-      const mockTxId = this.generateMockTxId();
-      return mockTxId;
+      const errorMsg = error?.response?.data?.message || error.message;
+      throw new Error(`Broadcast failed: ${errorMsg}`);
     }
   }
 
   /**
-   * Generate mock transaction ID
-   */
-  private generateMockTxId(): string {
-    return '0x' + Array.from({ length: 64 }, () => 
-      Math.floor(Math.random() * 16).toString(16)
-    ).join('');
-  }
-
-  /**
-   * Get transaction status (with mock fallback)
+   * Get transaction status (REAL)
+   * Uses /v1/transactions/{transactionId} endpoint
    */
   async getTransactionStatus(txId: string): Promise<TransactionStatus> {
-    if (this.useMockMode) {
-      return {
-        txId,
-        status: 'confirmed',
-        tick: this.getEstimatedTick()
-      };
-    }
-
     try {
-      const response = await this.rpcClient.get(`/transaction/${txId}`);
-      const data: any = response.data;
+      const response = await this.rpcClient.get(`/v1/transactions/${txId}`);
+      const data = response.data;
       
       return {
         txId,
-        status: data.status || 'confirmed',
-        tick: data.tick,
+        status: data.transaction?.executed ? 'confirmed' : 'pending',
+        tick: data.transaction?.tick,
         error: data.error
       };
     } catch (error: any) {
-      // Assume confirmed in mock mode
+      // Transaction not found yet might just mean it's pending
+      if (error.response?.status === 404) {
+        return {
+          txId,
+          status: 'pending'
+        };
+      }
+      
       return {
         txId,
-        status: 'confirmed',
-        tick: this.getEstimatedTick()
+        status: 'failed',
+        error: error.message
       };
     }
   }
 
   /**
-   * Wait for transaction confirmation (always succeeds in mock mode)
+   * Get transactions by tick
+   * Uses /v2/ticks/{tick}/transactions endpoint
    */
-  async waitForConfirmation(txId: string, maxWaitMs: number = 30000): Promise<boolean> {
-    if (this.useMockMode) {
-      await this.sleep(2000); // Simulate delay
-      console.log(`[Qubic Client] ✓ Mock transaction confirmed`);
-      return true;
+  async getTransactionsByTick(tick: number): Promise<any[]> {
+    try {
+      const response = await this.rpcClient.get(`/v2/ticks/${tick}/transactions`);
+      return response.data.transactions || [];
+    } catch (error: any) {
+      console.error(`[Qubic Client] Failed to get transactions for tick ${tick}:`, error.message);
+      return [];
     }
+  }
 
+  /**
+   * Wait for transaction confirmation (REAL)
+   * Polls the network until the transaction is confirmed or timeout occurs
+   */
+  async waitForConfirmation(txId: string, targetTick: number, maxWaitMs: number = 60000): Promise<boolean> {
     const startTime = Date.now();
+    let lastCheckedTick = 0;
+    
+    console.log(`[Qubic Client] Waiting for confirmation at tick ${targetTick}...`);
     
     while (Date.now() - startTime < maxWaitMs) {
-      const status = await this.getTransactionStatus(txId);
-      
-      if (status.status === 'confirmed') {
-        console.log(`[Qubic Client] ✓ Transaction confirmed at tick ${status.tick}`);
-        return true;
+      try {
+        // Get current tick
+        const currentTick = await this.getCurrentTick();
+        
+        if (currentTick !== lastCheckedTick) {
+          console.log(`[Qubic Client] Current tick: ${currentTick}, Target tick: ${targetTick}`);
+          lastCheckedTick = currentTick;
+        }
+        
+        // Check if we've reached or passed the target tick
+        if (currentTick >= targetTick) {
+          // Try to get transaction status
+          const status = await this.getTransactionStatus(txId);
+          
+          if (status.status === 'confirmed') {
+            console.log(`[Qubic Client] ✓ Transaction confirmed at tick ${status.tick}`);
+            return true;
+          }
+          
+          // Also check transactions in the target tick
+          const transactions = await this.getTransactionsByTick(targetTick);
+          const found = transactions.some((tx: any) => 
+            tx.txId === txId || tx.id === txId
+          );
+          
+          if (found) {
+            console.log(`[Qubic Client] ✓ Transaction found in tick ${targetTick}`);
+            return true;
+          }
+          
+          // If we're more than 10 ticks past target, stop waiting
+          if (currentTick > targetTick + 10) {
+            console.warn(`[Qubic Client] Transaction not found ${currentTick - targetTick} ticks after target`);
+            return false;
+          }
+        }
+      } catch (error: any) {
+        console.error(`[Qubic Client] Error checking confirmation: ${error.message}`);
       }
       
-      if (status.status === 'failed') {
-        console.error(`[Qubic Client] Transaction failed: ${status.error}`);
-        return false;
-      }
-      
+      // Wait 2 seconds before next check
       await this.sleep(2000);
     }
     
-    console.warn('[Qubic Client] Transaction confirmation timeout (assuming success)');
-    return true;
+    throw new Error(`Transaction confirmation timeout after ${maxWaitMs}ms`);
   }
 
   /**
-   * Get balance of an address (with fallback)
-   */
-  async getBalance(address: string): Promise<number> {
-    if (this.useMockMode) {
-      return 0;
-    }
-
-    try {
-      const response = await this.rpcClient.get(`/balance/${address}`);
-      const data: any = response.data;
-      return data.balance || 0;
-    } catch (error: any) {
-      return 0;
-    }
-  }
-
-  /**
-   * Health check (always returns true to not block startup)
+   * Health check (REAL)
    */
   async healthCheck(): Promise<boolean> {
     try {
+      const status = await this.getNetworkStatus();
       const tick = await this.getCurrentTick();
       
-      if (tick > 0 && !this.useMockMode) {
-        console.log('[Qubic Client] ✓ RPC is healthy');
-        return true;
-      }
+      console.log(`[Qubic Client] ✓ Connected to Qubic RPC`);
+      console.log(`[Qubic Client]   Network: ${Config.QUBIC.rpcEndpoint}`);
+      console.log(`[Qubic Client]   Current tick: ${tick}`);
+      console.log(`[Qubic Client]   Epoch: ${status.lastProcessedTick?.epoch || 'unknown'}`);
       
-      console.warn('[Qubic Client] ⚠️  RPC unavailable, using mock mode');
-      this.useMockMode = true;
-      return true; // Don't fail - use mock mode
+      return true;
     } catch (error: any) {
-      console.warn('[Qubic Client] ⚠️  RPC health check failed, using mock mode');
-      this.useMockMode = true;
-      return true; // Don't fail - use mock mode
+      console.error('[Qubic Client] ✗ RPC connection failed:', error.message);
+      console.error('[Qubic Client] Please verify:');
+      console.error(`[Qubic Client]   - RPC endpoint is correct: ${Config.QUBIC.rpcEndpoint}`);
+      console.error('[Qubic Client]   - Network connection is available');
+      console.error('[Qubic Client]   - RPC service is running');
+      return false;
     }
   }
 
   /**
-   * Parse contract state from raw data
+   * Extract transaction ID from encoded transaction
+   * This is a helper for when the RPC doesn't return a txId
    */
-  private parseContractState(rawState: any): EscrowContract {
-    return {
-      contractId: this.contractId,
-      brandId: rawState.brandId || '',
-      influencerId: rawState.influencerId || '',
-      escrowBalance: rawState.escrowBalance || 0,
-      requiredScore: rawState.requiredScore || 95,
-      verificationScore: rawState.verificationScore || 0,
-      retentionEndTick: rawState.retentionEndTick || 0,
-      isActive: rawState.isActive || false
-    };
-  }
-
-  /**
-   * Serialize transaction for broadcast
-   */
-  private serializeTransaction(tx: Transaction): string {
-    return JSON.stringify(tx);
-  }
-
-  /**
-   * Format error message
-   */
-  private formatError(error: any): string {
-    if (error && typeof error === 'object') {
-      if (error.response?.data?.message) {
-        return error.response.data.message;
-      }
-      if (error.message) {
-        return error.message;
-      }
+  private extractTxIdFromEncoded(encodedTransaction: string): string {
+    try {
+      // Decode the base64 transaction
+      const buffer = Buffer.from(encodedTransaction, 'base64');
+      
+      // Transaction ID is typically derived from the transaction hash
+      // For now, return a deterministic ID based on the encoded data
+      const crypto = require('crypto');
+      const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+      
+      return hash.substring(0, 64); // First 64 chars of hash
+    } catch (error) {
+      // Fallback to timestamp-based ID
+      return `tx-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     }
-    return String(error);
+  }
+
+  /**
+   * Parse contract state from raw binary data
+   * This should match your contract's state structure
+   */
+  private parseContractState(rawData: Buffer): EscrowContract {
+    // TODO: Implement proper binary parsing based on your contract's state structure
+    // This is a placeholder that would need to match your actual contract
+    
+    try {
+      // Example structure (adjust based on your actual contract):
+      // struct EscrowState {
+      //   id brandId;           // 32 bytes
+      //   id influencerId;      // 32 bytes
+      //   uint64 escrowBalance; // 8 bytes
+      //   uint8 requiredScore;  // 1 byte
+      //   uint8 verificationScore; // 1 byte
+      //   uint32 retentionEndTick; // 4 bytes
+      //   uint8 isActive;       // 1 byte
+      // };
+      
+      let offset = 0;
+      
+      // Read brandId (32 bytes)
+      const brandId = rawData.slice(offset, offset + 32).toString('hex');
+      offset += 32;
+      
+      // Read influencerId (32 bytes)
+      const influencerId = rawData.slice(offset, offset + 32).toString('hex');
+      offset += 32;
+      
+      // Read escrowBalance (8 bytes, uint64)
+      const escrowBalance = rawData.readBigUInt64LE(offset);
+      offset += 8;
+      
+      // Read requiredScore (1 byte)
+      const requiredScore = rawData.readUInt8(offset);
+      offset += 1;
+      
+      // Read verificationScore (1 byte)
+      const verificationScore = rawData.readUInt8(offset);
+      offset += 1;
+      
+      // Read retentionEndTick (4 bytes)
+      const retentionEndTick = rawData.readUInt32LE(offset);
+      offset += 4;
+      
+      // Read isActive (1 byte)
+      const isActive = rawData.readUInt8(offset) === 1;
+      
+      return {
+        contractId: this.contractId,
+        brandId,
+        influencerId,
+        escrowBalance: Number(escrowBalance),
+        requiredScore,
+        verificationScore,
+        retentionEndTick,
+        isActive
+      };
+    } catch (error) {
+      console.error('[Qubic Client] Failed to parse contract state:', error);
+      
+      // Return default state on error
+      return {
+        contractId: this.contractId,
+        brandId: '',
+        influencerId: '',
+        escrowBalance: 0,
+        requiredScore: 95,
+        verificationScore: 0,
+        retentionEndTick: 0,
+        isActive: false
+      };
+    }
   }
 
   /**
@@ -282,9 +448,9 @@ export class QubicClient {
   }
 
   /**
-   * Check if running in mock mode
+   * Get RPC endpoint being used
    */
-  isMockMode(): boolean {
-    return this.useMockMode;
+  getRpcEndpoint(): string {
+    return Config.QUBIC.rpcEndpoint;
   }
 }
