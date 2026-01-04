@@ -1,5 +1,8 @@
 # 🛠 Qubic Smart Escrow - Complete Project Structure
 
+[See the LabLab Portfolio](https://lablab.ai/event/qubic-hack-the-future/le-voix-nostromo-launchpad/qubic-escrow-ai-nostromo-launchpad)
+
+
 ## 📁 Directory Structure
 
 ```
